@@ -227,6 +227,12 @@ app/
 - httpx (async HTTP client)
 - Uvicorn + Starlette
 
+## How this was built
+
+This project was designed and implemented entirely using [Claude](https://claude.ai) (Anthropic's AI assistant), working from a detailed requirements specification. The spec covered architecture, service integration, database schema, polling strategy, MCP tool design, and a phased delivery plan. Claude wrote all the code, tests, documentation, and Docker configuration across five implementation phases.
+
+The human contribution was the product vision, requirements, and iterative feedback — Claude handled the engineering.
+
 ## License
 
-Private — not for redistribution.
+[MIT](LICENSE)
