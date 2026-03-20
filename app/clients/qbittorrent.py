@@ -62,8 +62,13 @@ class QBittorrentClient:
 
     async def ping(self) -> bool:
         try:
-            await self._get("/api/v2/app/version")
-            return True
+            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+                await self._ensure_auth(client)
+                cookies = {"SID": self._cookie} if self._cookie else {}
+                resp = await client.get(
+                    f"{self.base_url}/api/v2/app/version", cookies=cookies,
+                )
+                return resp.status_code == 200
         except Exception:
             return False
 

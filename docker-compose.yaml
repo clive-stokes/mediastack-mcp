@@ -65,7 +65,7 @@ services:
       start_period: 30s
     labels:
       <<: *labels-allow
-      homepage.group: "AI"
+      homepage.group: "Media Services"
       homepage.name: "MediaStack"
       homepage.icon: "sh-radarr-light.webp"
       homepage.description: "Media Stack Observer (MCP)"
