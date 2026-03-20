@@ -47,6 +47,37 @@ class RadarrClient(ArrClient):
         """Fetch health check warnings."""
         return await self.get("/api/v3/health")
 
+    # -- Write operations --
+
+    async def lookup(self, term: str) -> list[dict]:
+        """Search for movies to add."""
+        return await self.get("/api/v3/movie/lookup", params={"term": term})
+
+    async def get_quality_profiles(self) -> list[dict]:
+        return await self.get("/api/v3/qualityprofile")
+
+    async def add_movie(self, tmdb_id: int, title: str,
+                        quality_profile_id: int, root_folder_path: str,
+                        monitored: bool = True) -> dict:
+        """Add a movie to Radarr."""
+        results = await self.get("/api/v3/movie/lookup", params={"term": f"tmdb:{tmdb_id}"})
+        if not results:
+            raise ValueError(f"Movie with tmdbId {tmdb_id} not found")
+        movie_data = results[0]
+        movie_data.update({
+            "qualityProfileId": quality_profile_id,
+            "rootFolderPath": root_folder_path,
+            "monitored": monitored,
+            "addOptions": {"searchForMovie": True},
+        })
+        return await self.post("/api/v3/movie", json_data=movie_data)
+
+    async def search_movie(self, movie_id: int) -> dict:
+        """Trigger search for a movie."""
+        return await self.post("/api/v3/command", json_data={
+            "name": "MoviesSearch", "movieIds": [movie_id],
+        })
+
     def parse_history_event(self, event: dict) -> dict[str, Any]:
         """Normalise a Radarr history event into a MediaStack event."""
         movie = event.get("movie", {})

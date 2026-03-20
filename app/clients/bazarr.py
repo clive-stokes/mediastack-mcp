@@ -39,6 +39,27 @@ class BazarrClient:
     async def get_system_health(self) -> list[dict]:
         return await self.get("/api/system/health")
 
+    async def post(self, path: str, json_data: dict | None = None) -> Any:
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=self._headers(), json=json_data)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def search_subtitles_episode(self, episode_id: int, language: str | None = None) -> dict:
+        """Trigger subtitle search for an episode."""
+        params: dict = {"episodeid": episode_id}
+        if language:
+            params["language"] = language
+        return await self.post("/api/episodes/subtitles", json_data=params)
+
+    async def search_subtitles_movie(self, movie_id: int, language: str | None = None) -> dict:
+        """Trigger subtitle search for a movie."""
+        params: dict = {"radarrid": movie_id}
+        if language:
+            params["language"] = language
+        return await self.post("/api/movies/subtitles", json_data=params)
+
     async def ping(self) -> bool:
         try:
             await self.get("/api/system/status")

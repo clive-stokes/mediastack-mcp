@@ -35,6 +35,25 @@ class SeerrClient:
         """Get request counts by status."""
         return await self.get("/api/v1/request/count")
 
+    async def post(self, path: str, json_data: dict | None = None) -> Any:
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=self._headers(), json=json_data)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def search(self, query: str) -> list[dict]:
+        """Search for media in Seerr."""
+        data = await self.get("/api/v1/search", params={"query": query, "page": 1, "language": "en"})
+        return data.get("results", [])
+
+    async def request_media(self, media_type: str, media_id: int) -> dict:
+        """Create a media request."""
+        return await self.post("/api/v1/request", json_data={
+            "mediaType": media_type,
+            "mediaId": media_id,
+        })
+
     async def ping(self) -> bool:
         try:
             await self.get("/api/v1/status")

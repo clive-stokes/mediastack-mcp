@@ -48,6 +48,41 @@ class SonarrClient(ArrClient):
         """Fetch health check warnings."""
         return await self.get("/api/v3/health")
 
+    # -- Write operations --
+
+    async def lookup(self, term: str) -> list[dict]:
+        """Search for series to add."""
+        return await self.get("/api/v3/series/lookup", params={"term": term})
+
+    async def get_quality_profiles(self) -> list[dict]:
+        return await self.get("/api/v3/qualityprofile")
+
+    async def add_series(self, tvdb_id: int, title: str,
+                         quality_profile_id: int, root_folder_path: str,
+                         monitored: bool = True) -> dict:
+        """Add a series to Sonarr."""
+        # First lookup to get full series data
+        results = await self.get("/api/v3/series/lookup", params={"term": f"tvdb:{tvdb_id}"})
+        if not results:
+            raise ValueError(f"Series with tvdbId {tvdb_id} not found")
+        series_data = results[0]
+        series_data.update({
+            "qualityProfileId": quality_profile_id,
+            "rootFolderPath": root_folder_path,
+            "monitored": monitored,
+            "addOptions": {"searchForMissingEpisodes": True},
+        })
+        return await self.post("/api/v3/series", json_data=series_data)
+
+    async def search_missing_episodes(self, series_id: int, season: int | None = None) -> dict:
+        """Trigger search for missing episodes."""
+        body: dict = {"name": "MissingEpisodeSearch"}
+        if season is not None:
+            body = {"name": "SeasonSearch", "seriesId": series_id, "seasonNumber": season}
+        else:
+            body = {"name": "SeriesSearch", "seriesId": series_id}
+        return await self.post("/api/v3/command", json_data=body)
+
     def parse_history_event(self, event: dict) -> dict[str, Any]:
         """Normalise a Sonarr history event into a MediaStack event."""
         series = event.get("series") or {}

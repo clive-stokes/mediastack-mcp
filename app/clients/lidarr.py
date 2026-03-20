@@ -33,6 +33,37 @@ class LidarrClient(ArrClient):
     async def get_health(self) -> list[dict]:
         return await self.get("/api/v1/health")
 
+    # -- Write operations --
+
+    async def lookup(self, term: str) -> list[dict]:
+        """Search for artists to add."""
+        return await self.get("/api/v1/artist/lookup", params={"term": term})
+
+    async def get_quality_profiles(self) -> list[dict]:
+        return await self.get("/api/v1/qualityprofile")
+
+    async def add_artist(self, foreign_artist_id: str, artist_name: str,
+                         quality_profile_id: int, root_folder_path: str,
+                         monitored: bool = True) -> dict:
+        """Add an artist to Lidarr."""
+        results = await self.get("/api/v1/artist/lookup", params={"term": f"lidarr:{foreign_artist_id}"})
+        if not results:
+            raise ValueError(f"Artist {foreign_artist_id} not found")
+        artist_data = results[0]
+        artist_data.update({
+            "qualityProfileId": quality_profile_id,
+            "rootFolderPath": root_folder_path,
+            "monitored": monitored,
+            "addOptions": {"searchForMissingAlbums": True},
+        })
+        return await self.post("/api/v1/artist", json_data=artist_data)
+
+    async def search_missing(self, artist_id: int) -> dict:
+        """Trigger search for missing albums."""
+        return await self.post("/api/v1/command", json_data={
+            "name": "MissingAlbumSearch", "artistId": artist_id,
+        })
+
     async def ping(self) -> bool:
         try:
             await self.get("/api/v1/system/status")
