@@ -1,0 +1,101 @@
+"""Configuration and service auto-discovery from environment variables."""
+
+import os
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ServiceConfig:
+    """Config for a single *arr-style service."""
+    name: str
+    url: str
+    api_key: str
+
+
+@dataclass
+class CredentialConfig:
+    """Config for services using username/password."""
+    name: str
+    url: str
+    username: str
+    password: str
+
+
+@dataclass
+class Config:
+    """MediaStack configuration — auto-discovered from environment."""
+
+    # Database
+    db_url: str = ""
+
+    # Polling intervals (seconds)
+    poll_interval: int = 300       # 5 min for events
+    storage_interval: int = 3600   # 1 hr for storage
+    library_interval: int = 21600  # 6 hrs for library snapshots
+
+    # Discovered services
+    arr_services: dict[str, ServiceConfig] = field(default_factory=dict)
+    credential_services: dict[str, CredentialConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_env(cls) -> "Config":
+        cfg = cls()
+
+        # Database URL
+        cfg.db_url = os.environ.get(
+            "MEDIASTACK_DB_URL",
+            f"postgresql://{os.environ.get('DB_MEDIASTACK_USER', 'mediastack')}"
+            f":{os.environ.get('DB_MEDIASTACK_PASS', '')}"
+            f"@{os.environ.get('POSTGRES_HOST', 'postgres')}"
+            f":{os.environ.get('POSTGRES_PORT', '5432')}"
+            f"/{os.environ.get('DB_MEDIASTACK_NAME', 'mediastack')}",
+        )
+
+        # Polling intervals
+        cfg.poll_interval = int(os.environ.get("MEDIASTACK_POLL_INTERVAL", "300"))
+        cfg.storage_interval = int(os.environ.get("MEDIASTACK_STORAGE_INTERVAL", "3600"))
+        cfg.library_interval = int(os.environ.get("MEDIASTACK_LIBRARY_INTERVAL", "21600"))
+
+        # Auto-discover *arr services (URL + API_KEY pairs)
+        # URL vars are set in docker-compose env; API keys come from .docker.env
+        arr_pairs = [
+            ("sonarr", "SONARR_URL", "SONARR_API_KEY"),
+            ("radarr", "RADARR_URL", "RADARR_API_KEY"),
+            ("lidarr", "LIDARR_URL", "LIDARR_API_KEY"),
+            ("prowlarr", "PROWLARR_URL", "PROWLARR_API_KEY"),
+            ("bazarr", "BAZARR_URL", "BAZARR_API_KEY"),
+            ("seerr", "SEERR_URL", "SEERR_API_KEY"),
+            # Jellyfin uses JELLYFIN_API_URL in .docker.env
+            ("jellyfin", "JELLYFIN_URL", "JELLYFIN_API_KEY"),
+        ]
+        for name, url_var, key_var in arr_pairs:
+            url = os.environ.get(url_var)
+            key = os.environ.get(key_var)
+            if url and key:
+                cfg.arr_services[name] = ServiceConfig(name=name, url=url.rstrip("/"), api_key=key)
+
+        # Credential-based services
+        sab_url = os.environ.get("SABNZBD_URL")
+        sab_key = os.environ.get("SABNZBD_API_KEY")
+        if sab_url and sab_key:
+            cfg.credential_services["sabnzbd"] = CredentialConfig(
+                name="sabnzbd", url=sab_url.rstrip("/"), username="", password=sab_key,
+            )
+
+        # qBittorrent — NASgnolia uses QBITTORRENT_USERNAME / QBITTORRENT_PASSWORD
+        qbt_url = os.environ.get("QBITTORRENT_URL")
+        qbt_user = os.environ.get("QBITTORRENT_USERNAME") or os.environ.get("QBITTORRENT_USER")
+        qbt_pass = os.environ.get("QBITTORRENT_PASSWORD") or os.environ.get("QBITTORRENT_PASS")
+        if qbt_url and qbt_user and qbt_pass:
+            cfg.credential_services["qbittorrent"] = CredentialConfig(
+                name="qbittorrent", url=qbt_url.rstrip("/"), username=qbt_user, password=qbt_pass,
+            )
+
+        return cfg
+
+    def describe(self) -> str:
+        """Human-readable summary of discovered services."""
+        active = list(self.arr_services.keys()) + list(self.credential_services.keys())
+        if not active:
+            return "No services configured."
+        return f"Active services: {', '.join(sorted(active))}"

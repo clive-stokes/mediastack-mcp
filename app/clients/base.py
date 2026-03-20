@@ -1,0 +1,72 @@
+"""Base HTTP client for *arr-style services."""
+
+import logging
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_TIMEOUT = 30.0
+
+
+class ArrClient:
+    """Base client for Sonarr/Radarr/Lidarr/Prowlarr-style APIs."""
+
+    def __init__(self, name: str, url: str, api_key: str):
+        self.name = name
+        self.base_url = url
+        self.api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Api-Key": self.api_key}
+
+    async def get(self, path: str, params: dict | None = None) -> Any:
+        """GET request to the service API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.get(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def post(self, path: str, json_data: dict | None = None) -> Any:
+        """POST request to the service API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=self._headers(), json=json_data)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def ping(self) -> bool:
+        """Health check — returns True if the service responds."""
+        try:
+            await self.get("/api/v3/system/status")
+            return True
+        except Exception:
+            return False
+
+
+class JellyfinClient:
+    """Client for Jellyfin API (different auth pattern)."""
+
+    def __init__(self, url: str, api_key: str):
+        self.name = "jellyfin"
+        self.base_url = url
+        self.api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f'MediaBrowser Token="{self.api_key}"'}
+
+    async def get(self, path: str, params: dict | None = None) -> Any:
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.get(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def ping(self) -> bool:
+        try:
+            await self.get("/System/Info")
+            return True
+        except Exception:
+            return False

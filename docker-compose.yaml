@@ -1,0 +1,78 @@
+# =====================================================
+# MediaStack MCP Server - Unified Media Stack Observer
+# =====================================================
+# Polls Sonarr, Radarr, SABnzbd, qBittorrent, and more.
+# Records events, storage, and health to PostgreSQL.
+# Exposes MCP tools for agents and Claude Code.
+# Database: mediastack on central PostgreSQL
+# =====================================================
+
+x-labels-allow: &labels-allow
+  com.dockmon.update.policy: "allow"
+
+services:
+  mediastack-mcp:
+    build: .
+    container_name: mediastack-mcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - npm-network
+      - database-net
+    ports:
+      - "127.0.0.1:9202:8000"
+    environment:
+      TZ: ${TZ}
+      PYTHONUNBUFFERED: 1
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DB_MEDIASTACK_NAME: ${DB_MEDIASTACK_NAME}
+      DB_MEDIASTACK_USER: ${DB_MEDIASTACK_USER}
+      DB_MEDIASTACK_PASS: ${DB_MEDIASTACK_PASS}
+      # *arr services (container names as hostnames)
+      SONARR_URL: "http://sonarr:8989"
+      SONARR_API_KEY: ${SONARR_API_KEY}
+      RADARR_URL: "http://radarr:7878"
+      RADARR_API_KEY: ${RADARR_API_KEY}
+      LIDARR_URL: "http://lidarr:8686"
+      LIDARR_API_KEY: ${LIDARR_API_KEY}
+      # Download clients (behind gluetun VPN)
+      SABNZBD_URL: "http://gluetun:8080"
+      SABNZBD_API_KEY: ${SABNZBD_API_KEY}
+      QBITTORRENT_URL: "http://gluetun:8481"
+      QBITTORRENT_USERNAME: ${QBITTORRENT_USERNAME}
+      QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD}
+      # Jellyfin
+      JELLYFIN_URL: ${JELLYFIN_API_URL}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
+      # Seerr
+      SEERR_URL: "http://seerr:5055"
+      SEERR_API_KEY: ${SEERR_API_KEY}
+    volumes:
+      # Mount media storage read-only for filesystem stats (os.statvfs)
+      - /volume1/MagnoliaMedia:/media:ro
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      <<: *labels-allow
+      homepage.group: "AI"
+      homepage.name: "MediaStack"
+      homepage.icon: "sh-radarr-light.webp"
+      homepage.description: "Media Stack Observer (MCP)"
+      homepage.statusStyle: "dot"
+
+networks:
+  npm-network:
+    external: true
+  database-net:
+    external: true
