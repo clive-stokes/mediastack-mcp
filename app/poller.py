@@ -68,6 +68,7 @@ class Poller:
             asyncio.create_task(self._poll_storage_loop()),
             asyncio.create_task(self._poll_health_loop()),
             asyncio.create_task(self._poll_libraries_loop()),
+            asyncio.create_task(self._retention_loop()),
         ]
         await asyncio.gather(*tasks)
 
@@ -326,3 +327,18 @@ class Poller:
                     db.upsert_health(name, "unreachable", "Ping failed")
             except Exception as e:
                 db.upsert_health(name, "unreachable", str(e)[:200])
+
+    # -- Retention --
+
+    async def _retention_loop(self) -> None:
+        """Run retention/rollup once daily (every 24 hours)."""
+        # Wait 1 hour after startup before first run
+        await asyncio.sleep(3600)
+        while self._running:
+            try:
+                from app.retention import run_retention
+                results = run_retention()
+                logger.info("Retention completed: %s", results)
+            except Exception:
+                logger.exception("Error in retention job")
+            await asyncio.sleep(86400)  # 24 hours
