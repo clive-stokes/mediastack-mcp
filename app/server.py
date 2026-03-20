@@ -146,6 +146,63 @@ def mediastack_search(query: str, days: int = 30, source: str | None = None) -> 
 
 
 @mcp_app.tool()
+def mediastack_libraries(source: str | None = None, include_delta: bool = True) -> str:
+    """Get current library sizes and recent changes.
+
+    Shows item counts and disk usage per library from Sonarr, Radarr,
+    Lidarr, Jellyfin, and other configured services.
+
+    Args:
+        source: Filter by service (sonarr, radarr, lidarr, jellyfin, etc.)
+        include_delta: Include change since last snapshot (default True)
+    """
+    libraries = db.get_libraries_current()
+    if source:
+        libraries = [l for l in libraries if l["source"] == source]
+    if not libraries:
+        return "No library data yet. The poller needs at least one library snapshot cycle."
+
+    if include_delta:
+        for lib in libraries:
+            delta = db.get_library_delta(lib["source"], lib["library_name"])
+            if delta:
+                lib["delta"] = delta
+
+    return json.dumps(libraries, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_summary(period: str = "day") -> str:
+    """Get a condensed digest of media stack activity.
+
+    Summarises events by source, storage status, health issues, and
+    library changes for the given period. Designed for the media-brief
+    skill or any consumer wanting a quick overview.
+
+    Args:
+        period: One of "day" (24h), "week" (7d), or "month" (30d)
+    """
+    hours_map = {"day": 24, "week": 168, "month": 720}
+    hours = hours_map.get(period, 24)
+
+    result = {"period": period, "hours": hours}
+
+    # Event summary
+    result["events"] = db.get_event_summary(hours)
+
+    # Storage
+    result["storage"] = db.get_storage_current()
+
+    # Health
+    result["health"] = db.get_latest_health()
+
+    # Libraries
+    result["libraries"] = db.get_libraries_current()
+
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp_app.tool()
 def mediastack_stats() -> str:
     """Get MediaStack database statistics.
 

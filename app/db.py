@@ -187,6 +187,96 @@ def search_events(query: str, days: int = 30, source: str | None = None) -> list
         conn.close()
 
 
+# -- Library operations --
+
+def insert_library_snapshot(source: str, library_name: str, item_count: int,
+                            size_bytes: int | None = None) -> None:
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO library_snapshots (source, library_name, item_count, size_bytes) "
+                "VALUES (%s, %s, %s, %s)",
+                (source, library_name, item_count, size_bytes),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_libraries_current() -> list[dict]:
+    """Get latest snapshot per source+library_name."""
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (source, library_name)
+                    source, library_name, item_count, size_bytes, timestamp
+                FROM library_snapshots
+                ORDER BY source, library_name, timestamp DESC
+            """)
+            rows = cur.fetchall()
+            result = []
+            for r in rows:
+                entry = {
+                    "source": r["source"],
+                    "library_name": r["library_name"],
+                    "item_count": r["item_count"],
+                    "timestamp": r["timestamp"].isoformat(),
+                }
+                if r["size_bytes"] is not None:
+                    entry["size_bytes"] = r["size_bytes"]
+                result.append(entry)
+            return result
+    finally:
+        conn.close()
+
+
+def get_library_delta(source: str, library_name: str) -> dict | None:
+    """Get change since previous snapshot for a specific library."""
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT item_count, size_bytes, timestamp
+                FROM library_snapshots
+                WHERE source = %s AND library_name = %s
+                ORDER BY timestamp DESC
+                LIMIT 2
+            """, (source, library_name))
+            rows = cur.fetchall()
+            if len(rows) < 2:
+                return None
+            current, previous = rows[0], rows[1]
+            return {
+                "item_delta": current["item_count"] - previous["item_count"],
+                "size_delta": (current["size_bytes"] - previous["size_bytes"])
+                    if current["size_bytes"] is not None and previous["size_bytes"] is not None
+                    else None,
+                "since": previous["timestamp"].isoformat(),
+            }
+    finally:
+        conn.close()
+
+
+def get_event_summary(hours: int = 24) -> list[dict]:
+    """Get event counts grouped by source and event_type for the summary tool."""
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT source, event_type, count(*) as count,
+                       array_agg(DISTINCT title ORDER BY title) FILTER (WHERE title IS NOT NULL) as titles
+                FROM media_events
+                WHERE timestamp >= NOW() - INTERVAL '%s hours'
+                GROUP BY source, event_type
+                ORDER BY source, count DESC
+            """, (hours,))
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 # -- Storage operations --
 
 def insert_storage_snapshot(mount_point: str, total_bytes: int, used_bytes: int, source: str) -> None:
