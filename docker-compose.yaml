@@ -54,6 +54,18 @@ services:
       # Seerr
       SEERR_URL: "http://seerr:5055"
       SEERR_API_KEY: ${SEERR_API_KEY}
+      # Audiobookshelf (internal port 80, host-mapped to 13378)
+      AUDIOBOOKSHELF_URL: "http://audiobookshelf:80"
+      AUDIOBOOKSHELF_API_KEY: ${AUDIOBOOKSHELF_API_KEY}
+      # Dispatcharr (behind gluetun VPN)
+      DISPATCHARR_URL: "http://gluetun:9191"
+      DISPATCHARR_API_KEY: ${DISPATCHARR_API_KEY:-}
+      # Boxarr (no auth)
+      BOXARR_URL: "http://boxarr:8888"
+      # Suggestarr (JWT auth)
+      SUGGESTARR_URL: "http://suggestarr:5000"
+      SUGGESTARR_USERNAME: ${SUGGESTARR_USERNAME:-}
+      SUGGESTARR_PASSWORD: ${SUGGESTARR_PASSWORD:-}
     volumes:
       # Mount media storage read-only for filesystem stats (os.statvfs)
       - /volume1/MagnoliaMedia:/media:ro

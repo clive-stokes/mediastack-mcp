@@ -19,6 +19,10 @@ from app.clients.jellyfin import JellyfinClient
 from app.clients.seerr import SeerrClient
 from app.clients.sabnzbd import SabnzbdClient
 from app.clients.qbittorrent import QBittorrentClient
+from app.clients.audiobookshelf import AudiobookshelfClient
+from app.clients.boxarr import BoxarrClient
+from app.clients.dispatcharr import DispatcharrClient
+from app.clients.suggestarr import SuggestarrClient
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +55,20 @@ class Poller:
                 self._clients["jellyfin"] = JellyfinClient(svc.url, svc.api_key)
             elif name == "seerr":
                 self._clients["seerr"] = SeerrClient(svc.url, svc.api_key)
+            elif name == "audiobookshelf":
+                self._clients["audiobookshelf"] = AudiobookshelfClient(svc.url, svc.api_key)
+            elif name == "dispatcharr":
+                self._clients["dispatcharr"] = DispatcharrClient(svc.url, svc.api_key)
 
         for name, svc in self.config.credential_services.items():
             if name == "sabnzbd":
                 self._clients["sabnzbd"] = SabnzbdClient(svc.url, svc.password)
             elif name == "qbittorrent":
                 self._clients["qbittorrent"] = QBittorrentClient(svc.url, svc.username, svc.password)
+            elif name == "boxarr":
+                self._clients["boxarr"] = BoxarrClient(svc.url)
+            elif name == "suggestarr":
+                self._clients["suggestarr"] = SuggestarrClient(svc.url, svc.username, svc.password)
 
     async def start(self) -> None:
         """Start all polling loops."""
@@ -107,6 +119,14 @@ class Poller:
         # Seerr (request pipeline)
         if "seerr" in self._clients:
             await self._poll_seerr()
+
+        # Boxarr (box office additions)
+        if "boxarr" in self._clients:
+            await self._poll_boxarr()
+
+        # Suggestarr (recommendation stats)
+        if "suggestarr" in self._clients:
+            await self._poll_suggestarr()
 
     async def _poll_arr_history(self, name: str) -> None:
         """Poll a Sonarr/Radarr/Lidarr-style history endpoint."""
@@ -178,6 +198,47 @@ class Poller:
                 logger.info("[seerr] Recorded %d new events", inserted)
         except Exception:
             logger.exception("[seerr] Failed to poll requests")
+
+    async def _poll_boxarr(self) -> None:
+        client: BoxarrClient = self._clients["boxarr"]
+        try:
+            history = await client.get_scheduler_history()
+            events = []
+            for run in (history if isinstance(history, list) else []):
+                events.append({
+                    "source": "boxarr",
+                    "event_type": "scheduler_run",
+                    "title": f"Box office scan: {run.get('movies_found', 0)} found, {run.get('movies_added', 0)} added",
+                    "timestamp": run.get("timestamp"),
+                    "source_event_id": f"boxarr_run_{run.get('timestamp', '')}",
+                    "metadata": {
+                        "movies_found": run.get("movies_found"),
+                        "movies_added": run.get("movies_added"),
+                        "week": run.get("week"),
+                        "success": run.get("success"),
+                    },
+                })
+            inserted = db.insert_events(events)
+            if inserted:
+                logger.info("[boxarr] Recorded %d new events", inserted)
+        except Exception:
+            logger.exception("[boxarr] Failed to poll")
+
+    async def _poll_suggestarr(self) -> None:
+        client: SuggestarrClient = self._clients["suggestarr"]
+        try:
+            stats = await client.get_request_stats()
+            # Record stats as a periodic snapshot event
+            db.insert_event({
+                "source": "suggestarr",
+                "event_type": "stats_snapshot",
+                "title": f"Suggestions: {stats.get('total', 0)} total, {stats.get('today', 0)} today",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source_event_id": f"suggestarr_stats_{datetime.now(timezone.utc).strftime('%Y%m%d%H')}",
+                "metadata": stats,
+            })
+        except Exception:
+            logger.exception("[suggestarr] Failed to poll stats")
 
     # -- Storage polling --
 
@@ -296,6 +357,30 @@ class Poller:
             except Exception:
                 logger.exception("[jellyfin] Failed to poll library stats")
 
+        # Audiobookshelf: per-library stats
+        if "audiobookshelf" in self._clients:
+            try:
+                libraries = await self._clients["audiobookshelf"].get_libraries()
+                for lib in libraries:
+                    lib_name = lib.get("name", "Unknown")
+                    lib_id = lib.get("id", "")
+                    stats = lib.get("stats", {})
+                    item_count = stats.get("totalItems", 0)
+                    size = stats.get("totalSize", None)
+                    db.insert_library_snapshot("audiobookshelf", lib_name, item_count, size)
+                    count += 1
+            except Exception:
+                logger.exception("[audiobookshelf] Failed to poll library stats")
+
+        # Dispatcharr: channel count
+        if "dispatcharr" in self._clients:
+            try:
+                channel_count = await self._clients["dispatcharr"].get_channel_count()
+                db.insert_library_snapshot("dispatcharr", "IPTV Channels", channel_count, None)
+                count += 1
+            except Exception:
+                logger.exception("[dispatcharr] Failed to poll library stats")
+
         if count:
             logger.info("Recorded %d library snapshots", count)
 
@@ -309,6 +394,9 @@ class Poller:
                 logger.exception("Error in health polling cycle")
             await asyncio.sleep(self.config.poll_interval)
 
+    # Services whose get_health() returns *arr-style warning lists
+    _ARR_HEALTH_SERVICES = {"sonarr", "radarr", "lidarr", "prowlarr", "bazarr"}
+
     async def _poll_health(self) -> None:
         """Ping all configured services and record health state changes."""
         for name, client in self._clients.items():
@@ -316,9 +404,10 @@ class Poller:
                 alive = await client.ping()
                 if alive:
                     detail = None
-                    if hasattr(client, "get_health"):
+                    # Only check *arr-style health warnings for services that return them
+                    if name in self._ARR_HEALTH_SERVICES and hasattr(client, "get_health"):
                         warnings = await client.get_health()
-                        if warnings:
+                        if isinstance(warnings, list) and warnings:
                             detail = "; ".join(w.get("message", "") for w in warnings[:3])
                             db.upsert_health(name, "degraded", detail)
                             continue

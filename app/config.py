@@ -65,8 +65,9 @@ class Config:
             ("prowlarr", "PROWLARR_URL", "PROWLARR_API_KEY"),
             ("bazarr", "BAZARR_URL", "BAZARR_API_KEY"),
             ("seerr", "SEERR_URL", "SEERR_API_KEY"),
-            # Jellyfin uses JELLYFIN_API_URL in .docker.env
             ("jellyfin", "JELLYFIN_URL", "JELLYFIN_API_KEY"),
+            ("audiobookshelf", "AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_API_KEY"),
+            ("dispatcharr", "DISPATCHARR_URL", "DISPATCHARR_API_KEY"),
         ]
         for name, url_var, key_var in arr_pairs:
             url = os.environ.get(url_var)
@@ -89,6 +90,22 @@ class Config:
         if qbt_url and qbt_user and qbt_pass:
             cfg.credential_services["qbittorrent"] = CredentialConfig(
                 name="qbittorrent", url=qbt_url.rstrip("/"), username=qbt_user, password=qbt_pass,
+            )
+
+        # Boxarr — no auth, URL only
+        boxarr_url = os.environ.get("BOXARR_URL")
+        if boxarr_url:
+            cfg.credential_services["boxarr"] = CredentialConfig(
+                name="boxarr", url=boxarr_url.rstrip("/"), username="", password="",
+            )
+
+        # Suggestarr — JWT auth (username/password)
+        sug_url = os.environ.get("SUGGESTARR_URL")
+        sug_user = os.environ.get("SUGGESTARR_USERNAME")
+        sug_pass = os.environ.get("SUGGESTARR_PASSWORD")
+        if sug_url and sug_user and sug_pass:
+            cfg.credential_services["suggestarr"] = CredentialConfig(
+                name="suggestarr", url=sug_url.rstrip("/"), username=sug_user, password=sug_pass,
             )
 
         return cfg
