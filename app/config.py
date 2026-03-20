@@ -67,7 +67,6 @@ class Config:
             ("seerr", "SEERR_URL", "SEERR_API_KEY"),
             ("jellyfin", "JELLYFIN_URL", "JELLYFIN_API_KEY"),
             ("audiobookshelf", "AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_API_KEY"),
-            ("dispatcharr", "DISPATCHARR_URL", "DISPATCHARR_API_KEY"),
         ]
         for name, url_var, key_var in arr_pairs:
             url = os.environ.get(url_var)
@@ -90,6 +89,15 @@ class Config:
         if qbt_url and qbt_user and qbt_pass:
             cfg.credential_services["qbittorrent"] = CredentialConfig(
                 name="qbittorrent", url=qbt_url.rstrip("/"), username=qbt_user, password=qbt_pass,
+            )
+
+        # Dispatcharr — JWT auth (username/password)
+        disp_url = os.environ.get("DISPATCHARR_URL")
+        disp_user = os.environ.get("DISPATCHARR_USERNAME")
+        disp_pass = os.environ.get("DISPATCHARR_PASSWORD")
+        if disp_url and disp_user and disp_pass:
+            cfg.credential_services["dispatcharr"] = CredentialConfig(
+                name="dispatcharr", url=disp_url.rstrip("/"), username=disp_user, password=disp_pass,
             )
 
         # Boxarr — no auth, URL only

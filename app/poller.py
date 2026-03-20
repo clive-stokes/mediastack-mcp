@@ -57,8 +57,6 @@ class Poller:
                 self._clients["seerr"] = SeerrClient(svc.url, svc.api_key)
             elif name == "audiobookshelf":
                 self._clients["audiobookshelf"] = AudiobookshelfClient(svc.url, svc.api_key)
-            elif name == "dispatcharr":
-                self._clients["dispatcharr"] = DispatcharrClient(svc.url, svc.api_key)
 
         for name, svc in self.config.credential_services.items():
             if name == "sabnzbd":
@@ -69,6 +67,8 @@ class Poller:
                 self._clients["boxarr"] = BoxarrClient(svc.url)
             elif name == "suggestarr":
                 self._clients["suggestarr"] = SuggestarrClient(svc.url, svc.username, svc.password)
+            elif name == "dispatcharr":
+                self._clients["dispatcharr"] = DispatcharrClient(svc.url, svc.username, svc.password)
 
     async def start(self) -> None:
         """Start all polling loops."""
