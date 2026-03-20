@@ -32,7 +32,11 @@ app/
     ├── jellyfin.py     # Jellyfin API (library stats)
     ├── seerr.py        # Seerr API v1 (request pipeline + search)
     ├── sabnzbd.py      # SABnzbd API (download history)
-    └── qbittorrent.py  # qBittorrent Web API v2 (state diffing)
+    ├── qbittorrent.py  # qBittorrent Web API v2 (state diffing)
+    ├── audiobookshelf.py # Audiobookshelf API (library stats via /stats endpoint)
+    ├── boxarr.py       # Boxarr API (box office tracking, no auth)
+    ├── dispatcharr.py  # Dispatcharr API (IPTV channels/EPG, JWT auth)
+    └── suggestarr.py   # Suggestarr API (AI recommendations, JWT auth)
 ```
 
 ## MCP Tools
@@ -57,7 +61,7 @@ app/
 ### Confirmation
 - `mediastack_confirm` — Execute a previewed write action (5-min expiry)
 
-## Services (9 active)
+## Services (13 active)
 
 | Service | Events | Storage | Libraries | Health | Write |
 |---------|--------|---------|-----------|--------|-------|
@@ -70,6 +74,10 @@ app/
 | Seerr | request pipeline | — | — | yes | request |
 | SABnzbd | download history | — | — | yes | — |
 | qBittorrent | state diff | — | — | yes | — |
+| Audiobookshelf | — | — | per-library stats | yes | — |
+| Boxarr | scheduler history | — | — | yes | — |
+| Dispatcharr | system events | — | channel count | yes | — |
+| Suggestarr | recommendation stats | — | — | yes | — |
 
 ## Key Design Decisions
 
@@ -82,3 +90,6 @@ app/
 - Write ops use async bridge via poller event loop
 - Retention: events rolled up at 90 days, storage at 14 days
 - media-brief skill registered in nanobot as MCP consumer
+- Audiobookshelf /api/libraries doesn't include stats inline — must call /api/libraries/{id}/stats separately
+- Dispatcharr and Suggestarr use JWT auth (username/password login → token)
+- Boxarr has no auth — designed for local/Tailscale-only access

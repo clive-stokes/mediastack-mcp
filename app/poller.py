@@ -357,14 +357,17 @@ class Poller:
             except Exception:
                 logger.exception("[jellyfin] Failed to poll library stats")
 
-        # Audiobookshelf: per-library stats
+        # Audiobookshelf: per-library stats (requires separate stats endpoint)
         if "audiobookshelf" in self._clients:
             try:
                 libraries = await self._clients["audiobookshelf"].get_libraries()
                 for lib in libraries:
                     lib_name = lib.get("name", "Unknown")
                     lib_id = lib.get("id", "")
-                    stats = lib.get("stats", {})
+                    try:
+                        stats = await self._clients["audiobookshelf"].get_library_stats(lib_id)
+                    except Exception:
+                        stats = {}
                     item_count = stats.get("totalItems", 0)
                     size = stats.get("totalSize", None)
                     db.insert_library_snapshot("audiobookshelf", lib_name, item_count, size)
