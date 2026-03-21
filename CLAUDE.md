@@ -50,16 +50,18 @@ app/
 - `mediastack_libraries` — Library sizes and changes
 - `mediastack_summary` — Condensed digest for media-brief skill
 
-### Write (6 tools, all require confirmation)
+### Write (8 tools, all require confirmation)
 - `mediastack_search_content` — Search *arr lookup APIs
 - `mediastack_add_content` — Add to Sonarr/Radarr/Lidarr
 - `mediastack_list_profiles` — Show quality profiles and root folders
 - `mediastack_request_content` — Request via Seerr
 - `mediastack_search_missing` — Trigger *arr missing content search
 - `mediastack_search_subtitles` — Trigger Bazarr subtitle search
+- `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
+- `mediastack_cancel_request` — Cancel a Seerr request
 
 ### Confirmation
-- `mediastack_confirm` — Execute a previewed write action (5-min expiry)
+- `mediastack_confirm` — Execute a previewed write action (5-min expiry, 2-min for file deletion)
 
 ## Services (13 active)
 
@@ -93,3 +95,6 @@ app/
 - Audiobookshelf /api/libraries doesn't include stats inline — must call /api/libraries/{id}/stats separately
 - Dispatcharr and Suggestarr use JWT auth (username/password login → token)
 - Boxarr has no auth — designed for local/Tailscale-only access
+- Content deletion uses tiered safety: library-only removal (default, 5-min expiry) vs file deletion (2-min expiry + prominent warning)
+- No bulk deletion — single item_id only, no arrays or wildcards
+- Deletion audit trail stored as `delete_confirmed` event type with full preview metadata for manual re-add

@@ -58,6 +58,17 @@ class LidarrClient(ArrClient):
         })
         return await self.post("/api/v1/artist", json_data=artist_data)
 
+    async def get_artist_by_id(self, artist_id: int) -> dict:
+        """Fetch a single artist by its Lidarr internal ID."""
+        return await self.get(f"/api/v1/artist/{artist_id}")
+
+    async def delete_artist(self, artist_id: int, delete_files: bool = False) -> dict:
+        """Delete an artist from Lidarr."""
+        return await self.delete(
+            f"/api/v1/artist/{artist_id}",
+            params={"deleteFiles": str(delete_files).lower()},
+        )
+
     async def search_missing(self, artist_id: int) -> dict:
         """Trigger search for missing albums."""
         return await self.post("/api/v1/command", json_data={

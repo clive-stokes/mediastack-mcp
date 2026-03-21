@@ -72,6 +72,17 @@ class RadarrClient(ArrClient):
         })
         return await self.post("/api/v3/movie", json_data=movie_data)
 
+    async def get_movie_by_id(self, movie_id: int) -> dict:
+        """Fetch a single movie by its Radarr internal ID."""
+        return await self.get(f"/api/v3/movie/{movie_id}")
+
+    async def delete_movie(self, movie_id: int, delete_files: bool = False) -> dict:
+        """Delete a movie from Radarr."""
+        return await self.delete(
+            f"/api/v3/movie/{movie_id}",
+            params={"deleteFiles": str(delete_files).lower()},
+        )
+
     async def search_movie(self, movie_id: int) -> dict:
         """Trigger search for a movie."""
         return await self.post("/api/v3/command", json_data={

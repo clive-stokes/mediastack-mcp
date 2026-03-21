@@ -25,10 +25,11 @@ class PendingAction:
     preview: dict
     execute_fn: Callable[[], Awaitable[dict]]
     created_at: float = field(default_factory=time.time)
+    expiry_seconds: int = EXPIRY_SECONDS
 
     @property
     def expired(self) -> bool:
-        return (time.time() - self.created_at) > EXPIRY_SECONDS
+        return (time.time() - self.created_at) > self.expiry_seconds
 
 
 class ConfirmationStore:
@@ -39,7 +40,8 @@ class ConfirmationStore:
         self._lock = threading.Lock()
 
     def create(self, description: str, preview: dict,
-               execute_fn: Callable[[], Awaitable[dict]]) -> PendingAction:
+               execute_fn: Callable[[], Awaitable[dict]],
+               expiry_seconds: int = EXPIRY_SECONDS) -> PendingAction:
         """Register a pending action and return it with a confirmation_id."""
         self._cleanup()
         cid = secrets.token_hex(8)
@@ -48,6 +50,7 @@ class ConfirmationStore:
             description=description,
             preview=preview,
             execute_fn=execute_fn,
+            expiry_seconds=expiry_seconds,
         )
         with self._lock:
             self._pending[cid] = action

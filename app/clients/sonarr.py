@@ -74,6 +74,17 @@ class SonarrClient(ArrClient):
         })
         return await self.post("/api/v3/series", json_data=series_data)
 
+    async def get_series_by_id(self, series_id: int) -> dict:
+        """Fetch a single series by its Sonarr internal ID."""
+        return await self.get(f"/api/v3/series/{series_id}")
+
+    async def delete_series(self, series_id: int, delete_files: bool = False) -> dict:
+        """Delete a series from Sonarr."""
+        return await self.delete(
+            f"/api/v3/series/{series_id}",
+            params={"deleteFiles": str(delete_files).lower()},
+        )
+
     async def search_missing_episodes(self, series_id: int, season: int | None = None) -> dict:
         """Trigger search for missing episodes."""
         body: dict = {"name": "MissingEpisodeSearch"}

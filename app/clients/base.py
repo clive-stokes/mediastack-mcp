@@ -37,6 +37,17 @@ class ArrClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def delete(self, path: str, params: dict | None = None) -> Any:
+        """DELETE request to the service API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.delete(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            # DELETE often returns 204 No Content
+            if resp.status_code == 204 or not resp.content:
+                return {"status": "deleted"}
+            return resp.json()
+
     async def ping(self) -> bool:
         """Health check — returns True if the service responds."""
         try:

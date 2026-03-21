@@ -47,6 +47,24 @@ class SeerrClient:
         data = await self.get("/api/v1/search", params={"query": query, "page": 1, "language": "en"})
         return data.get("results", [])
 
+    async def delete(self, path: str, params: dict | None = None) -> Any:
+        """DELETE request to the Seerr API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.delete(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            if resp.status_code == 204 or not resp.content:
+                return {"status": "deleted"}
+            return resp.json()
+
+    async def get_request_by_id(self, request_id: int) -> dict:
+        """Fetch a single request by ID."""
+        return await self.get(f"/api/v1/request/{request_id}")
+
+    async def delete_request(self, request_id: int) -> dict:
+        """Cancel/delete a Seerr request."""
+        return await self.delete(f"/api/v1/request/{request_id}")
+
     async def request_media(self, media_type: str, media_id: int) -> dict:
         """Create a media request."""
         return await self.post("/api/v1/request", json_data={

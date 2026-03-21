@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from app import db
 from app.config import Config
 from app.poller import Poller
-from app.confirmations import store as confirmation_store
+from app.confirmations import store as confirmation_store, EXPIRY_SECONDS
 
 # Patch: relax Accept header validation so Claude Code can connect.
 import mcp.server.streamable_http as _shttp
@@ -254,10 +254,14 @@ def mediastack_confirm(confirmation_id: str) -> str:
 
     try:
         result = _run_async(action.execute_fn())
+        # Use specific event_type for deletions vs other writes
+        event_type = "write_confirmed"
+        if action.preview.get("action") in ("delete", "cancel_request"):
+            event_type = "delete_confirmed"
         # Record write event in media_events for audit trail
         db.insert_event({
             "source": "mediastack",
-            "event_type": "write_confirmed",
+            "event_type": event_type,
             "title": action.description,
             "metadata": {"action_preview": action.preview, "result": str(result)[:500]},
             "source_event_id": f"mediastack_confirm_{action.confirmation_id}",
@@ -569,6 +573,187 @@ def mediastack_search_subtitles(
         "confirmation_id": action.confirmation_id,
         "message": f"{desc}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
     }, indent=2)
+
+
+DELETE_FILES_EXPIRY = 120  # 2-minute expiry when files will be deleted
+
+
+def _format_bytes(size_bytes: int) -> str:
+    """Format bytes into human-readable string."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size_bytes) < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} PB"
+
+
+@mcp_app.tool()
+def mediastack_delete_content(
+    media_type: str,
+    item_id: int,
+    delete_files: bool = False,
+) -> str:
+    """Remove content from an *arr library. Returns a preview; requires confirmation.
+
+    Removes a single series, movie, or artist from the corresponding *arr service.
+    By default, only the library entry is removed — files on disk are kept.
+    Set delete_files=True to also permanently delete media files from disk.
+
+    IMPORTANT: File deletion is irreversible. The preview will show exactly
+    what will be affected. Confirm only when you are certain.
+
+    Args:
+        media_type: "tv" (Sonarr series), "movie" (Radarr movie), or "music" (Lidarr artist)
+        item_id: The *arr internal ID (series ID, movie ID, or artist ID)
+        delete_files: If True, permanently delete media files from disk (default False)
+    """
+    service_map = {"tv": "sonarr", "movie": "radarr", "music": "lidarr"}
+    service_name = service_map.get(media_type)
+    if not service_name:
+        return json.dumps({"error": f"Invalid media_type '{media_type}'. Use: tv, movie, or music"})
+
+    client = _get_poller_client(service_name)
+    if not client:
+        return json.dumps({"error": f"{service_name} is not configured"})
+
+    try:
+        # Fetch full item details for the preview
+        if media_type == "tv":
+            item = _run_async(client.get_series_by_id(item_id))
+            title = item.get("title", "Unknown")
+            size_on_disk = item.get("statistics", {}).get("sizeOnDisk", 0)
+            path = item.get("path", "Unknown")
+            external_id_key = "tvdbId"
+            external_id = item.get("tvdbId")
+            quality_profile_id = item.get("qualityProfileId")
+        elif media_type == "movie":
+            item = _run_async(client.get_movie_by_id(item_id))
+            title = f"{item.get('title', 'Unknown')} ({item.get('year', '?')})"
+            size_on_disk = item.get("sizeOnDisk", 0)
+            path = item.get("path", "Unknown")
+            external_id_key = "tmdbId"
+            external_id = item.get("tmdbId")
+            quality_profile_id = item.get("qualityProfileId")
+        else:  # music
+            item = _run_async(client.get_artist_by_id(item_id))
+            title = item.get("artistName", "Unknown")
+            size_on_disk = item.get("statistics", {}).get("sizeOnDisk", 0)
+            path = item.get("path", "Unknown")
+            external_id_key = "foreignArtistId"
+            external_id = item.get("foreignArtistId")
+            quality_profile_id = item.get("qualityProfileId")
+
+        size_str = _format_bytes(size_on_disk) if size_on_disk else "0 B"
+
+        if delete_files:
+            warning = (
+                f"THIS WILL PERMANENTLY DELETE {size_str} OF FILES FROM DISK. "
+                f"Path: {path}. This cannot be undone."
+            )
+        else:
+            warning = (
+                f"Content will be removed from the {service_name.title()} library. "
+                f"Files on disk ({size_str} at {path}) will NOT be deleted."
+            )
+
+        preview = {
+            "action": "delete",
+            "service": service_name,
+            "title": title,
+            "media_type": media_type,
+            "item_id": item_id,
+            "delete_files": delete_files,
+            "size_on_disk": size_str,
+            "path": path,
+            external_id_key: external_id,
+            "quality_profile_id": quality_profile_id,
+            "warning": warning,
+        }
+
+        files_label = " AND DELETE FILES" if delete_files else ""
+        description = f"Remove '{title}' from {service_name.title()}{files_label}"
+
+        async def execute():
+            if media_type == "tv":
+                return await client.delete_series(item_id, delete_files)
+            elif media_type == "movie":
+                return await client.delete_movie(item_id, delete_files)
+            else:
+                return await client.delete_artist(item_id, delete_files)
+
+        # Shortened expiry for file deletion
+        expiry = DELETE_FILES_EXPIRY if delete_files else EXPIRY_SECONDS
+        action = confirmation_store.create(description, preview, execute, expiry_seconds=expiry)
+
+        msg = f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute."
+        if delete_files:
+            msg += f" WARNING: Files will be permanently deleted. Confirmation expires in {expiry} seconds."
+
+        return json.dumps({
+            "preview": preview,
+            "confirmation_id": action.confirmation_id,
+            "expires_in_seconds": expiry,
+            "message": msg,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_cancel_request(request_id: int) -> str:
+    """Cancel a Seerr media request. Returns a preview; requires confirmation.
+
+    Removes a pending or approved request from Seerr. This does not affect
+    any content already downloaded to *arr libraries.
+
+    Args:
+        request_id: The Seerr request ID
+    """
+    client = _get_poller_client("seerr")
+    if not client:
+        return json.dumps({"error": "Seerr is not configured"})
+
+    try:
+        request = _run_async(client.get_request_by_id(request_id))
+        media = request.get("media", {})
+        req_type = request.get("type", "unknown")
+        status = request.get("status", 0)
+        status_map = {1: "pending", 2: "approved", 3: "declined"}
+        status_label = status_map.get(status, f"status_{status}")
+
+        title = "Unknown"
+        if media:
+            if req_type == "movie":
+                title = media.get("originalTitle") or media.get("title", "Unknown")
+            elif req_type == "tv":
+                title = media.get("name") or media.get("originalName", "Unknown")
+
+        requested_by = request.get("requestedBy", {})
+        user_name = requested_by.get("displayName") or requested_by.get("email", "unknown")
+
+        preview = {
+            "action": "cancel_request",
+            "service": "seerr",
+            "title": title,
+            "media_type": req_type,
+            "request_id": request_id,
+            "status": status_label,
+            "requested_by": user_name,
+            "warning": f"This will cancel the {status_label} request for '{title}'.",
+        }
+        description = f"Cancel Seerr request for '{title}' (request #{request_id}, {status_label})"
+
+        async def execute():
+            return await client.delete_request(request_id)
+
+        action = confirmation_store.create(description, preview, execute)
+        return json.dumps({
+            "preview": preview,
+            "confirmation_id": action.confirmation_id,
+            "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 # -- Startup --
