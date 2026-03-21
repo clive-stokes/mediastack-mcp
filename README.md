@@ -10,25 +10,26 @@ A unified [Model Context Protocol](https://modelcontextprotocol.io/) server for 
 - Library sizes across all services
 - Service health with degradation detection
 
-**Actor** — Controlled content acquisition with a two-step confirmation protocol:
+**Actor** — Controlled content management with a two-step confirmation protocol:
 - Search and add content to Sonarr/Radarr/Lidarr
-- Request content via Seerr/Overseerr
+- Remove content from Sonarr/Radarr/Lidarr (with optional file deletion)
+- Request or cancel content via Seerr
 - Trigger missing episode/movie searches
 - Trigger subtitle searches via Bazarr
 
-Every write operation requires explicit confirmation before execution.
+Every write operation requires explicit confirmation before execution. Destructive operations (file deletion) use a shortened 2-minute confirmation expiry with prominent warnings.
 
 ## Supported Services
 
 | Service | Events | Libraries | Health | Write |
 |---|---|---|---|---|
-| Sonarr | history | series + size | warnings | add, search |
-| Radarr | history | movies + size | warnings | add, search |
-| Lidarr | history | artists + size | warnings | add, search |
+| Sonarr | history | series + size | warnings | add, delete, search |
+| Radarr | history | movies + size | warnings | add, delete, search |
+| Lidarr | history | artists + size | warnings | add, delete, search |
 | Prowlarr | — | — | warnings | — |
 | Bazarr | subtitle history | — | warnings | subtitle search |
 | Jellyfin | — | per-library counts | ping | — |
-| Seerr/Overseerr | request pipeline | — | ping | request |
+| Seerr | request pipeline | — | ping | request, cancel |
 | Audiobookshelf | — | books + podcasts | ping | — |
 | Boxarr | scheduler runs | — | ping | — |
 | Suggestarr | recommendation stats | — | ping | — |
@@ -38,7 +39,7 @@ Every write operation requires explicit confirmation before execution.
 
 Services are auto-discovered from environment variables. Missing services are silently skipped.
 
-## MCP Tools (14)
+## MCP Tools (16)
 
 ### Read
 - `mediastack_timeline` — Recent events from all sources
@@ -56,6 +57,8 @@ Services are auto-discovered from environment variables. Missing services are si
 - `mediastack_request_content` — Request via Seerr
 - `mediastack_search_missing` — Trigger missing content search
 - `mediastack_search_subtitles` — Trigger Bazarr subtitle search
+- `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
+- `mediastack_cancel_request` — Cancel a Seerr request
 - `mediastack_confirm` — Execute a previewed write action
 
 ## Quick Start
@@ -154,11 +157,11 @@ For non-HTTPS connections, add `"--allow-http"` to the args.
 
 ```
 app/
-├── server.py           # FastMCP server, 14 tools, /health endpoint
+├── server.py           # FastMCP server, 16 tools, /health endpoint
 ├── config.py           # Service auto-discovery from env vars
 ├── db.py               # PostgreSQL schema + queries
 ├── poller.py           # Background polling engine
-├── confirmations.py    # Write confirmation protocol (5-min expiry)
+├── confirmations.py    # Write confirmation protocol (5-min standard, 2-min for file deletion)
 ├── retention.py        # Data rollup (90d events, 14d storage)
 └── clients/            # Per-service API clients (13 services)
 ```

@@ -27,12 +27,12 @@ MediaStack does **not** restart containers, modify service configurations, or pe
 │  │  Port 8000      │         └──────────────────────────┘      │
 │  └──────┬─────────┘                                            │
 │         │                                                       │
-│   Polls (every 5 min):                 Writes (confirmed):     │
-│   ├── Sonarr       (:8989)            ├── Sonarr (add, search) │
-│   ├── Radarr       (:7878)            ├── Radarr (add, search) │
-│   ├── Lidarr       (:8686)            ├── Lidarr (add, search) │
-│   ├── Prowlarr     (:9696)            ├── Seerr  (request)     │
-│   ├── Bazarr       (:6767)            └── Bazarr (subtitles)   │
+│   Polls (every 5 min):                 Writes (confirmed):         │
+│   ├── Sonarr       (:8989)            ├── Sonarr (add/del, search) │
+│   ├── Radarr       (:7878)            ├── Radarr (add/del, search) │
+│   ├── Lidarr       (:8686)            ├── Lidarr (add/del, search) │
+│   ├── Prowlarr     (:9696)            ├── Seerr  (request, cancel) │
+│   ├── Bazarr       (:6767)            └── Bazarr (subtitles)       │
 │   ├── Jellyfin     (:8096)                                     │
 │   ├── Seerr        (:5055)                                     │
 │   ├── Audiobookshelf (:80)                                     │
@@ -154,7 +154,7 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_libraries` | Library sizes and deltas | `source`, `include_delta` |
 | `mediastack_summary` | Condensed digest for briefings | `period` (day/week/month) |
 
-### Write Tools (6, all require confirmation)
+### Write Tools (8, all require confirmation)
 
 | Tool | Description | Key Parameters |
 |---|---|---|
@@ -164,6 +164,8 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_request_content` | Request via Seerr | `query`, `media_type` |
 | `mediastack_search_missing` | Trigger *arr missing search | `service`, `item_id`, `season` |
 | `mediastack_search_subtitles` | Trigger Bazarr subtitle search | `media_type`, `item_id`, `language` |
+| `mediastack_delete_content` | Remove from Sonarr/Radarr/Lidarr | `media_type`, `item_id`, `delete_files` |
+| `mediastack_cancel_request` | Cancel a Seerr request | `request_id` |
 
 ### Confirmation Protocol
 
@@ -175,6 +177,15 @@ All write tools return a **preview** and a **confirmation_id**. To execute:
 ```
 
 Unconfirmed actions expire after **5 minutes**. All confirmed writes are logged to `media_events` as audit trail.
+
+### Deletion Safety
+
+Content deletion uses a tiered safety model:
+
+- **Library-only removal** (`delete_files=false`, default) — removes from *arr database, files stay on disk. Standard 5-minute confirmation expiry.
+- **File deletion** (`delete_files=true`) — removes entry AND deletes media files. Shortened **2-minute** expiry with prominent warning showing path and size.
+- **No bulk operations** — single `item_id` only. No arrays or wildcards.
+- **Audit trail** — deletions logged as `delete_confirmed` event type with full metadata (external ID, quality profile, root folder) enabling manual re-add if needed.
 
 ---
 
