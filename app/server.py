@@ -243,14 +243,33 @@ def mediastack_confirm(confirmation_id: str) -> str:
 
     All write operations (add content, request, search missing, etc.)
     return a confirmation_id. Call this tool with that ID to execute
-    the action. Unconfirmed actions expire after 5 minutes.
+    the action. Unconfirmed actions expire after 5 minutes (2 for file
+    deletion).
+
+    If the confirmation has expired, this tool will automatically
+    re-issue the same preview with a fresh confirmation_id — no need
+    to re-run the original command.
 
     Args:
         confirmation_id: The ID returned by a write operation preview
     """
     action = confirmation_store.get(confirmation_id)
     if not action:
-        return json.dumps({"error": "Confirmation not found or expired. Please re-run the original command."})
+        # Check if it expired — if so, re-issue with a fresh ID
+        expired_action = confirmation_store.get_expired(confirmation_id)
+        if expired_action:
+            renewed = confirmation_store.renew(expired_action)
+            return json.dumps({
+                "status": "renewed",
+                "message": (
+                    f"Previous confirmation expired. Re-issued with fresh ID. "
+                    f"Call mediastack_confirm('{renewed.confirmation_id}') to execute."
+                ),
+                "confirmation_id": renewed.confirmation_id,
+                "description": renewed.description,
+                "preview": renewed.preview,
+            }, indent=2, default=str)
+        return json.dumps({"error": "Confirmation not found. Please re-run the original command."})
 
     try:
         result = _run_async(action.execute_fn())
