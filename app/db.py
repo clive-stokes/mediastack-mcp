@@ -138,8 +138,11 @@ def get_timeline(hours: int = 24, source: str | None = None,
             conditions = ["timestamp >= NOW() - INTERVAL '%s hours'"]
             params: list = [hours]
             if source:
-                conditions.append("source = %s")
-                params.append(source)
+                conditions.append(
+                    "(source = %s OR (source = 'mediastack'"
+                    " AND metadata->'action_preview'->>'service' = %s))"
+                )
+                params.extend([source, source])
             if event_type:
                 conditions.append("event_type = %s")
                 params.append(event_type)
@@ -170,8 +173,11 @@ def search_events(query: str, days: int = 30, source: str | None = None) -> list
             ]
             params: list = [days, f"%{query}%"]
             if source:
-                conditions.append("source = %s")
-                params.append(source)
+                conditions.append(
+                    "(source = %s OR (source = 'mediastack'"
+                    " AND metadata->'action_preview'->>'service' = %s))"
+                )
+                params.extend([source, source])
             where = " AND ".join(conditions)
             cur.execute(
                 f"SELECT id, timestamp, source, event_type, title, metadata "
