@@ -228,6 +228,31 @@ def mediastack_stats() -> str:
     }, indent=2)
 
 
+# -- Suggestarr Suggestions --
+
+@mcp_app.tool()
+def mediastack_suggestions(limit: int = 50) -> str:
+    """List content suggestions from Suggestarr.
+
+    Returns the AI-generated media recommendations with title, type, year,
+    overview, rating, and the source that triggered each suggestion.
+
+    Args:
+        limit: Maximum suggestions to return (default 50)
+    """
+    client = _get_poller_client("suggestarr")
+    if not client:
+        return json.dumps({"error": "Suggestarr is not configured"})
+
+    try:
+        suggestions = _run_async(client.get_all_suggestions(limit=limit))
+        if not suggestions:
+            return "No suggestions found."
+        return json.dumps(suggestions, indent=2, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 # -- Phase 3: Write Operations --
 
 def _get_poller_client(name: str):

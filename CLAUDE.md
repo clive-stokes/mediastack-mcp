@@ -41,11 +41,12 @@ app/
 
 ## MCP Tools
 
-### Read (7 tools)
+### Read (8 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
 - `mediastack_search` — Search events by title
+- `mediastack_suggestions` — List AI-generated content suggestions from Suggestarr
 - `mediastack_stats` — Database statistics
 - `mediastack_libraries` — Library sizes and changes
 - `mediastack_summary` — Condensed digest for media-brief skill

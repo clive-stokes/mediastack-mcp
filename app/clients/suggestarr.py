@@ -56,6 +56,44 @@ class SuggestarrClient:
         """Get all requests with source media and rationale."""
         return await self.get("/api/automation/requests", params={"page": page})
 
+    async def get_all_suggestions(self, limit: int = 50) -> list[dict]:
+        """Fetch suggestions across all pages and flatten into a simple list.
+
+        Returns a flat list of suggestion dicts (title, media_type, year,
+        overview, rating, source, requested_at) up to ``limit`` items,
+        ordered most-recent first.
+        """
+        suggestions: list[dict] = []
+        page = 1
+
+        while True:
+            data = await self.get_requests(page=page)
+            sources = data.get("data", [])
+            if not sources:
+                break
+
+            for source in sources:
+                source_title = source.get("source_title", "Unknown")
+                for req in source.get("requests", []):
+                    suggestions.append({
+                        "title": req.get("title", "Unknown"),
+                        "media_type": req.get("media_type"),
+                        "year": (req.get("release_date") or "")[:4] or None,
+                        "overview": (req.get("overview") or "")[:200],
+                        "rating": req.get("rating"),
+                        "source": source_title,
+                        "requested_at": req.get("requested_at"),
+                        "request_id": req.get("request_id"),
+                    })
+
+            page += 1
+            total_pages = data.get("total_pages", 1)
+            if page > total_pages:
+                break
+
+        # Already in reverse-chronological order from the API; trim to limit
+        return suggestions[:limit]
+
     async def get_job_history(self, limit: int = 50) -> list[dict]:
         """Get recent job execution history."""
         return await self.get("/api/jobs/history", params={"limit": limit})
