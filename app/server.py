@@ -775,6 +775,351 @@ def mediastack_cancel_request(request_id: int) -> str:
         return json.dumps({"error": str(e)})
 
 
+# -- Jellyfin User Operations --
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_search(query: str, limit: int = 20) -> str:
+    """Search the Jellyfin library by name.
+
+    Returns matching items with name, year, type, overview, and current
+    favourite/played status. Use the returned item_id for favourite,
+    watched, collection, or playlist operations.
+
+    Args:
+        query: Search term — matched against item names
+        limit: Maximum results to return (default 20)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    try:
+        results = _run_async(client.search_items(query, limit))
+        if not results:
+            return json.dumps({"results": [], "message": f"No items matching '{query}'"})
+        return json.dumps({"results": results, "count": len(results)}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_genres(
+    media_type: str | None = None,
+    genre: str | None = None,
+    limit: int = 50,
+) -> str:
+    """List Jellyfin genres or browse items by genre.
+
+    Two modes:
+    - No genre: returns list of available genres
+    - With genre: returns items in that genre
+
+    Args:
+        media_type: Filter by type — Movie, Series, Audio (optional)
+        genre: Genre name to browse items for (optional)
+        limit: Maximum items when browsing by genre (default 50)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    try:
+        if genre:
+            items = _run_async(client.get_items_by_genre(genre, media_type, limit))
+            return json.dumps({
+                "genre": genre,
+                "items": items,
+                "count": len(items),
+            }, indent=2)
+        else:
+            genres = _run_async(client.get_genres(media_type))
+            return json.dumps({
+                "genres": genres,
+                "count": len(genres),
+            }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_favorite(
+    item_id: str, item_name: str, favorite: bool = True,
+) -> str:
+    """Add or remove a Jellyfin item from favourites. Requires confirmation.
+
+    Use mediastack_jellyfin_search to find the item_id first.
+
+    Args:
+        item_id: Jellyfin item ID (from search results)
+        item_name: Item name (for confirmation display)
+        favorite: True to add to favourites, False to remove (default True)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    action_label = "Add to" if favorite else "Remove from"
+    description = f"{action_label} favourites: '{item_name}'"
+    preview = {
+        "action": "favorite" if favorite else "unfavorite",
+        "service": "jellyfin",
+        "item_id": item_id,
+        "item_name": item_name,
+        "favorite": favorite,
+    }
+
+    async def execute():
+        return await client.set_favorite(item_id, favorite)
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_watched(
+    item_id: str, item_name: str, played: bool = True,
+) -> str:
+    """Mark a Jellyfin item as played or unplayed. Requires confirmation.
+
+    Use mediastack_jellyfin_search to find the item_id first.
+
+    Args:
+        item_id: Jellyfin item ID (from search results)
+        item_name: Item name (for confirmation display)
+        played: True to mark as played, False for unplayed (default True)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    action_label = "Mark as played" if played else "Mark as unplayed"
+    description = f"{action_label}: '{item_name}'"
+    preview = {
+        "action": "mark_played" if played else "mark_unplayed",
+        "service": "jellyfin",
+        "item_id": item_id,
+        "item_name": item_name,
+        "played": played,
+    }
+
+    async def execute():
+        return await client.set_played(item_id, played)
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_collection_create(
+    name: str, item_ids: str | None = None,
+) -> str:
+    """Create a new Jellyfin collection. Requires confirmation.
+
+    Args:
+        name: Collection name
+        item_ids: Comma-separated Jellyfin item IDs to include (optional)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
+    description = f"Create collection '{name}'"
+    if ids:
+        description += f" with {len(ids)} item(s)"
+    preview = {
+        "action": "create_collection",
+        "service": "jellyfin",
+        "name": name,
+        "item_count": len(ids),
+    }
+
+    async def execute():
+        return await client.create_collection(name, ids or None)
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_collection_modify(
+    collection_id: str,
+    collection_name: str,
+    add_ids: str | None = None,
+    remove_ids: str | None = None,
+) -> str:
+    """Add or remove items from a Jellyfin collection. Requires confirmation.
+
+    Args:
+        collection_id: Jellyfin collection ID
+        collection_name: Collection name (for confirmation display)
+        add_ids: Comma-separated item IDs to add (optional)
+        remove_ids: Comma-separated item IDs to remove (optional)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    adds = [i.strip() for i in add_ids.split(",")] if add_ids else []
+    removes = [i.strip() for i in remove_ids.split(",")] if remove_ids else []
+
+    if not adds and not removes:
+        return json.dumps({"error": "Provide add_ids or remove_ids (or both)"})
+
+    parts = []
+    if adds:
+        parts.append(f"add {len(adds)}")
+    if removes:
+        parts.append(f"remove {len(removes)}")
+    description = f"Modify collection '{collection_name}': {' and '.join(parts)} item(s)"
+
+    preview = {
+        "action": "modify_collection",
+        "service": "jellyfin",
+        "collection_id": collection_id,
+        "collection_name": collection_name,
+        "adding": len(adds),
+        "removing": len(removes),
+    }
+
+    async def execute():
+        results = {}
+        if adds:
+            results["added"] = await client.add_to_collection(collection_id, adds)
+        if removes:
+            results["removed"] = await client.remove_from_collection(collection_id, removes)
+        return results
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_playlist_create(
+    name: str,
+    item_ids: str | None = None,
+    media_type: str = "Video",
+) -> str:
+    """Create a new Jellyfin playlist. Requires confirmation.
+
+    Args:
+        name: Playlist name
+        item_ids: Comma-separated Jellyfin item IDs to include (optional)
+        media_type: Video or Audio (default Video)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
+    description = f"Create {media_type.lower()} playlist '{name}'"
+    if ids:
+        description += f" with {len(ids)} item(s)"
+    preview = {
+        "action": "create_playlist",
+        "service": "jellyfin",
+        "name": name,
+        "media_type": media_type,
+        "item_count": len(ids),
+    }
+
+    async def execute():
+        return await client.create_playlist(name, ids or None, media_type)
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_playlist_modify(
+    playlist_id: str,
+    playlist_name: str,
+    add_ids: str | None = None,
+    remove_ids: str | None = None,
+    move_item_id: str | None = None,
+    move_to_index: int | None = None,
+) -> str:
+    """Add, remove, or reorder items in a Jellyfin playlist. Requires confirmation.
+
+    Args:
+        playlist_id: Jellyfin playlist ID
+        playlist_name: Playlist name (for confirmation display)
+        add_ids: Comma-separated item IDs to add (optional)
+        remove_ids: Comma-separated item IDs to remove (optional)
+        move_item_id: Item ID to move (optional, requires move_to_index)
+        move_to_index: New position for the item, zero-based (optional)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    adds = [i.strip() for i in add_ids.split(",")] if add_ids else []
+    removes = [i.strip() for i in remove_ids.split(",")] if remove_ids else []
+    has_move = move_item_id is not None and move_to_index is not None
+
+    if not adds and not removes and not has_move:
+        return json.dumps({"error": "Provide add_ids, remove_ids, or move_item_id + move_to_index"})
+
+    parts = []
+    if adds:
+        parts.append(f"add {len(adds)}")
+    if removes:
+        parts.append(f"remove {len(removes)}")
+    if has_move:
+        parts.append(f"move 1 item to position {move_to_index}")
+    description = f"Modify playlist '{playlist_name}': {', '.join(parts)}"
+
+    preview = {
+        "action": "modify_playlist",
+        "service": "jellyfin",
+        "playlist_id": playlist_id,
+        "playlist_name": playlist_name,
+        "adding": len(adds),
+        "removing": len(removes),
+        "moving": has_move,
+    }
+
+    async def execute():
+        results = {}
+        if adds:
+            results["added"] = await client.add_to_playlist(playlist_id, adds)
+        if removes:
+            results["removed"] = await client.remove_from_playlist(playlist_id, removes)
+        if has_move:
+            results["moved"] = await client.move_playlist_item(
+                playlist_id, move_item_id, move_to_index,
+            )
+        return results
+
+    action = confirmation_store.create(description, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
 # -- Startup --
 
 def _run_poller_thread(config: Config) -> None:

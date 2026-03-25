@@ -142,7 +142,7 @@ FROM library_snapshots ORDER BY source, library_name;
 
 ## MCP Tools
 
-### Read Tools (7)
+### Read Tools (9)
 
 | Tool | Description | Key Parameters |
 |---|---|---|
@@ -153,8 +153,10 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_stats` | Database statistics | — |
 | `mediastack_libraries` | Library sizes and deltas | `source`, `include_delta` |
 | `mediastack_summary` | Condensed digest for briefings | `period` (day/week/month) |
+| `mediastack_jellyfin_search` | Search Jellyfin library by name | `query`, `limit` |
+| `mediastack_jellyfin_genres` | List genres or browse items by genre | `media_type`, `genre`, `limit` |
 
-### Write Tools (8, all require confirmation)
+### Write Tools (14, all require confirmation)
 
 | Tool | Description | Key Parameters |
 |---|---|---|
@@ -166,6 +168,12 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_search_subtitles` | Trigger Bazarr subtitle search | `media_type`, `item_id`, `language` |
 | `mediastack_delete_content` | Remove from Sonarr/Radarr/Lidarr | `media_type`, `item_id`, `delete_files` |
 | `mediastack_cancel_request` | Cancel a Seerr request | `request_id` |
+| `mediastack_jellyfin_favorite` | Add/remove Jellyfin favourite | `item_id`, `item_name`, `favorite` |
+| `mediastack_jellyfin_watched` | Mark played/unplayed | `item_id`, `item_name`, `played` |
+| `mediastack_jellyfin_collection_create` | Create a Jellyfin collection | `name`, `item_ids` |
+| `mediastack_jellyfin_collection_modify` | Modify collection items | `collection_id`, `add_ids`, `remove_ids` |
+| `mediastack_jellyfin_playlist_create` | Create a Jellyfin playlist | `name`, `item_ids`, `media_type` |
+| `mediastack_jellyfin_playlist_modify` | Modify playlist items/order | `playlist_id`, `add_ids`, `remove_ids`, `move_item_id` |
 
 ### Confirmation Protocol
 

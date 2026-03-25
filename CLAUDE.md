@@ -29,7 +29,7 @@ app/
     ├── lidarr.py       # Lidarr API v1 (read + write)
     ├── prowlarr.py     # Prowlarr API v1 (health + indexer stats)
     ├── bazarr.py       # Bazarr API (subtitle history + search)
-    ├── jellyfin.py     # Jellyfin API (library stats)
+    ├── jellyfin.py     # Jellyfin API (library stats, search, user data, collections, playlists)
     ├── seerr.py        # Seerr API v1 (request pipeline + search)
     ├── sabnzbd.py      # SABnzbd API (download history)
     ├── qbittorrent.py  # qBittorrent Web API v2 (state diffing)
@@ -41,7 +41,7 @@ app/
 
 ## MCP Tools
 
-### Read (7 tools)
+### Read (9 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
@@ -49,8 +49,10 @@ app/
 - `mediastack_stats` — Database statistics
 - `mediastack_libraries` — Library sizes and changes
 - `mediastack_summary` — Condensed digest for media-brief skill
+- `mediastack_jellyfin_search` — Search Jellyfin library by name
+- `mediastack_jellyfin_genres` — List genres or browse items by genre
 
-### Write (8 tools, all require confirmation)
+### Write (14 tools, all require confirmation)
 - `mediastack_search_content` — Search *arr lookup APIs
 - `mediastack_add_content` — Add to Sonarr/Radarr/Lidarr
 - `mediastack_list_profiles` — Show quality profiles and root folders
@@ -59,9 +61,15 @@ app/
 - `mediastack_search_subtitles` — Trigger Bazarr subtitle search
 - `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
 - `mediastack_cancel_request` — Cancel a Seerr request
+- `mediastack_jellyfin_favorite` — Add/remove Jellyfin item from favourites
+- `mediastack_jellyfin_watched` — Mark Jellyfin item as played/unplayed
+- `mediastack_jellyfin_collection_create` — Create a Jellyfin collection
+- `mediastack_jellyfin_collection_modify` — Add/remove items from a Jellyfin collection
+- `mediastack_jellyfin_playlist_create` — Create a Jellyfin playlist
+- `mediastack_jellyfin_playlist_modify` — Add/remove/reorder Jellyfin playlist items
 
 ### Confirmation
-- `mediastack_confirm` — Execute a previewed write action (5-min expiry, 2-min for file deletion)
+- `mediastack_confirm` — Execute a previewed write action (5-min expiry, 2-min for file deletion, auto-renew on expiry)
 
 ## Services (13 active)
 
@@ -72,7 +80,7 @@ app/
 | Lidarr | history | root folders | artist count | yes | add, search |
 | Prowlarr | — | — | — | yes | — |
 | Bazarr | subtitle history | — | — | yes | subtitle search |
-| Jellyfin | — | — | 20 libraries | yes | — |
+| Jellyfin | — | — | 20 libraries | yes | favourite, watched, collections, playlists |
 | Seerr | request pipeline | — | — | yes | request |
 | SABnzbd | download history | — | — | yes | — |
 | qBittorrent | state diff | — | — | yes | — |
