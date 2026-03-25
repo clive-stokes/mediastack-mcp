@@ -1014,6 +1014,9 @@ def mediastack_jellyfin_collection_create(
 ) -> str:
     """Create a new Jellyfin collection. Requires confirmation.
 
+    IMPORTANT: To add items to an EXISTING collection, use
+    mediastack_jellyfin_collection_modify instead.
+
     Args:
         name: Collection name
         item_ids: Comma-separated Jellyfin item IDs to include (optional)
@@ -1021,6 +1024,26 @@ def mediastack_jellyfin_collection_create(
     client = _get_poller_client("jellyfin")
     if not client:
         return json.dumps({"error": "Jellyfin is not configured"})
+
+    # Check for existing collection with the same name
+    try:
+        existing = _run_async(client.get_collections(limit=100))
+        matches = [c for c in existing if c["name"].lower() == name.lower()]
+        if matches:
+            match = matches[0]
+            return json.dumps({
+                "warning": f"A collection named '{match['name']}' already exists.",
+                "existing_collection_id": match["item_id"],
+                "existing_item_count": match.get("child_count", 0),
+                "suggestion": (
+                    f"Use mediastack_jellyfin_collection_modify("
+                    f"collection_id=\"{match['item_id']}\", "
+                    f"collection_name=\"{match['name']}\", "
+                    f"add_ids=\"...\") to add items to the existing collection."
+                ),
+            }, indent=2)
+    except Exception:
+        pass
 
     ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
     description = f"Create collection '{name}'"
@@ -1109,6 +1132,11 @@ def mediastack_jellyfin_playlist_create(
 ) -> str:
     """Create a new Jellyfin playlist. Requires confirmation.
 
+    IMPORTANT: To add items to an EXISTING playlist, use
+    mediastack_jellyfin_playlist_modify instead. This tool creates
+    a new playlist — duplicates will result if a playlist with the
+    same name already exists.
+
     Args:
         name: Playlist name
         item_ids: Comma-separated Jellyfin item IDs to include (optional)
@@ -1117,6 +1145,26 @@ def mediastack_jellyfin_playlist_create(
     client = _get_poller_client("jellyfin")
     if not client:
         return json.dumps({"error": "Jellyfin is not configured"})
+
+    # Check for existing playlist with the same name
+    try:
+        existing = _run_async(client.get_playlists(limit=100))
+        matches = [p for p in existing if p["name"].lower() == name.lower()]
+        if matches:
+            match = matches[0]
+            return json.dumps({
+                "warning": f"A playlist named '{match['name']}' already exists.",
+                "existing_playlist_id": match["item_id"],
+                "existing_item_count": match.get("child_count", 0),
+                "suggestion": (
+                    f"Use mediastack_jellyfin_playlist_modify("
+                    f"playlist_id=\"{match['item_id']}\", "
+                    f"playlist_name=\"{match['name']}\", "
+                    f"add_ids=\"...\") to add items to the existing playlist."
+                ),
+            }, indent=2)
+    except Exception:
+        pass  # If the check fails, proceed with creation anyway
 
     ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
     description = f"Create {media_type.lower()} playlist '{name}'"
