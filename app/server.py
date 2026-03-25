@@ -843,6 +843,30 @@ def mediastack_jellyfin_genres(
 
 
 @mcp_app.tool()
+def mediastack_jellyfin_favorites(
+    media_type: str | None = None,
+    limit: int = 50,
+) -> str:
+    """List the current user's Jellyfin favourites.
+
+    Args:
+        media_type: Filter by type — Movie, Series, Audio (optional)
+        limit: Maximum items to return (default 50)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    try:
+        results = _run_async(client.get_favorites(media_type, limit))
+        if not results:
+            return json.dumps({"results": [], "message": "No favourites found"})
+        return json.dumps({"results": results, "count": len(results)}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
 def mediastack_jellyfin_favorite(
     item_id: str, item_name: str, favorite: bool = True,
 ) -> str:
@@ -916,6 +940,62 @@ def mediastack_jellyfin_watched(
         "confirmation_id": action.confirmation_id,
         "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
     }, indent=2)
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_collections(
+    collection_id: str | None = None,
+    limit: int = 50,
+) -> str:
+    """List Jellyfin collections, or show items in a specific collection.
+
+    Args:
+        collection_id: If provided, list items in this collection. Otherwise list all collections.
+        limit: Maximum collections to return (default 50)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    try:
+        if collection_id:
+            items = _run_async(client.get_collection_items(collection_id))
+            return json.dumps({"items": items, "count": len(items)}, indent=2)
+        else:
+            collections = _run_async(client.get_collections(limit))
+            if not collections:
+                return json.dumps({"collections": [], "message": "No collections found"})
+            return json.dumps({"collections": collections, "count": len(collections)}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_jellyfin_playlists(
+    playlist_id: str | None = None,
+    limit: int = 50,
+) -> str:
+    """List Jellyfin playlists, or show items in a specific playlist.
+
+    Args:
+        playlist_id: If provided, list items in this playlist (ordered). Otherwise list all playlists.
+        limit: Maximum playlists to return (default 50)
+    """
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    try:
+        if playlist_id:
+            items = _run_async(client.get_playlist_items(playlist_id))
+            return json.dumps({"items": items, "count": len(items)}, indent=2)
+        else:
+            playlists = _run_async(client.get_playlists(limit))
+            if not playlists:
+                return json.dumps({"playlists": [], "message": "No playlists found"})
+            return json.dumps({"playlists": playlists, "count": len(playlists)}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp_app.tool()

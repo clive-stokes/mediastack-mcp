@@ -99,6 +99,23 @@ class JellyfinClient(BaseJellyfinClient):
         data = await self.get(f"/Users/{user_id}/Items", params=params)
         return self._slim_items(data.get("Items", []))
 
+    async def get_favorites(self, media_type: str | None = None,
+                             limit: int = 50) -> list[dict]:
+        """Get the current user's favourite items."""
+        user_id = await self.get_user_id()
+        params: dict = {
+            "IsFavorite": True,
+            "Recursive": True,
+            "Limit": limit,
+            "Fields": "Overview,UserData",
+            "SortBy": "SortName",
+            "SortOrder": "Ascending",
+        }
+        if media_type:
+            params["IncludeItemTypes"] = media_type
+        data = await self.get(f"/Users/{user_id}/Items", params=params)
+        return self._slim_items(data.get("Items", []))
+
     # -- User data: favourites & watched --
 
     async def set_favorite(self, item_id: str, favorite: bool) -> dict:
@@ -118,6 +135,53 @@ class JellyfinClient(BaseJellyfinClient):
             return await self.post(path)
         else:
             return await self.delete(path)
+
+    async def get_collections(self, limit: int = 50) -> list[dict]:
+        """List all collections."""
+        user_id = await self.get_user_id()
+        data = await self.get(f"/Users/{user_id}/Items", params={
+            "IncludeItemTypes": "BoxSet",
+            "Recursive": True,
+            "Limit": limit,
+            "SortBy": "SortName",
+            "SortOrder": "Ascending",
+        })
+        items = data.get("Items", [])
+        return [{"item_id": i["Id"], "name": i.get("Name", "Unknown"),
+                 "child_count": i.get("ChildCount", 0)} for i in items]
+
+    async def get_collection_items(self, collection_id: str) -> list[dict]:
+        """List items in a collection."""
+        user_id = await self.get_user_id()
+        data = await self.get(f"/Users/{user_id}/Items", params={
+            "ParentId": collection_id,
+            "Fields": "Overview,UserData",
+        })
+        return self._slim_items(data.get("Items", []))
+
+    async def get_playlists(self, limit: int = 50) -> list[dict]:
+        """List all playlists."""
+        user_id = await self.get_user_id()
+        data = await self.get(f"/Users/{user_id}/Items", params={
+            "IncludeItemTypes": "Playlist",
+            "Recursive": True,
+            "Limit": limit,
+            "SortBy": "SortName",
+            "SortOrder": "Ascending",
+        })
+        items = data.get("Items", [])
+        return [{"item_id": i["Id"], "name": i.get("Name", "Unknown"),
+                 "media_type": i.get("MediaType", "Unknown"),
+                 "child_count": i.get("ChildCount", 0)} for i in items]
+
+    async def get_playlist_items(self, playlist_id: str) -> list[dict]:
+        """List items in a playlist (ordered)."""
+        user_id = await self.get_user_id()
+        data = await self.get(f"/Playlists/{playlist_id}/Items", params={
+            "UserId": user_id,
+            "Fields": "Overview,UserData",
+        })
+        return self._slim_items(data.get("Items", []))
 
     # -- Collections --
 
