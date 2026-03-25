@@ -37,6 +37,22 @@ class JellyfinClient(BaseJellyfinClient):
                     raise RuntimeError("No Jellyfin users found")
         return self._user_id
 
+    async def resolve_user_id(self, user_name: str | None = None) -> str:
+        """Resolve a user ID — by name if given, otherwise the default user."""
+        if not user_name:
+            return await self.get_user_id()
+        # Cache the user list to avoid repeated calls
+        if not hasattr(self, "_users_cache"):
+            self._users_cache: dict[str, str] = {}
+        if not self._users_cache:
+            users = await self.get("/Users")
+            self._users_cache = {u["Name"].lower(): u["Id"] for u in users}
+        uid = self._users_cache.get(user_name.lower())
+        if not uid:
+            available = ", ".join(sorted(self._users_cache.keys()))
+            raise ValueError(f"User '{user_name}' not found. Available: {available}")
+        return uid
+
     # -- Library stats (existing) --
 
     async def get_item_counts(self) -> dict:
@@ -65,9 +81,10 @@ class JellyfinClient(BaseJellyfinClient):
 
     # -- Search & Browse --
 
-    async def search_items(self, query: str, limit: int = 20) -> list[dict]:
+    async def search_items(self, query: str, limit: int = 20,
+                            user_name: str | None = None) -> list[dict]:
         """Search library items by name. Returns slim item dicts with user data."""
-        user_id = await self.get_user_id()
+        user_id = await self.resolve_user_id(user_name)
         data = await self.get(f"/Users/{user_id}/Items", params={
             "SearchTerm": query,
             "Recursive": True,
@@ -88,9 +105,10 @@ class JellyfinClient(BaseJellyfinClient):
 
     async def get_items_by_genre(self, genre: str,
                                   media_type: str | None = None,
-                                  limit: int = 50) -> list[dict]:
+                                  limit: int = 50,
+                                  user_name: str | None = None) -> list[dict]:
         """Browse items by genre name."""
-        user_id = await self.get_user_id()
+        user_id = await self.resolve_user_id(user_name)
         params: dict = {
             "Genres": genre,
             "Recursive": True,
@@ -105,9 +123,10 @@ class JellyfinClient(BaseJellyfinClient):
         return self._slim_items(data.get("Items", []))
 
     async def get_favorites(self, media_type: str | None = None,
-                             limit: int = 50) -> list[dict]:
-        """Get the current user's favourite items."""
-        user_id = await self.get_user_id()
+                             limit: int = 50,
+                             user_name: str | None = None) -> list[dict]:
+        """Get a user's favourite items."""
+        user_id = await self.resolve_user_id(user_name)
         params: dict = {
             "IsFavorite": True,
             "Recursive": True,
@@ -123,18 +142,20 @@ class JellyfinClient(BaseJellyfinClient):
 
     # -- User data: favourites & watched --
 
-    async def set_favorite(self, item_id: str, favorite: bool) -> dict:
+    async def set_favorite(self, item_id: str, favorite: bool,
+                            user_name: str | None = None) -> dict:
         """Add or remove an item from favourites."""
-        user_id = await self.get_user_id()
+        user_id = await self.resolve_user_id(user_name)
         path = f"/Users/{user_id}/FavoriteItems/{item_id}"
         if favorite:
             return await self.post(path)
         else:
             return await self.delete(path)
 
-    async def set_played(self, item_id: str, played: bool) -> dict:
+    async def set_played(self, item_id: str, played: bool,
+                          user_name: str | None = None) -> dict:
         """Mark an item as played or unplayed."""
-        user_id = await self.get_user_id()
+        user_id = await self.resolve_user_id(user_name)
         path = f"/Users/{user_id}/PlayedItems/{item_id}"
         if played:
             return await self.post(path)

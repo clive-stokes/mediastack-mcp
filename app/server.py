@@ -779,7 +779,8 @@ def mediastack_cancel_request(request_id: int) -> str:
 
 
 @mcp_app.tool()
-def mediastack_jellyfin_search(query: str, limit: int = 20) -> str:
+def mediastack_jellyfin_search(query: str, limit: int = 20,
+                                user_name: str | None = None) -> str:
     """Search the Jellyfin library by name.
 
     Returns matching items with name, year, type, overview, and current
@@ -789,13 +790,14 @@ def mediastack_jellyfin_search(query: str, limit: int = 20) -> str:
     Args:
         query: Search term — matched against item names
         limit: Maximum results to return (default 20)
+        user_name: Jellyfin user name to query as (default: primary admin)
     """
     client = _get_poller_client("jellyfin")
     if not client:
         return json.dumps({"error": "Jellyfin is not configured"})
 
     try:
-        results = _run_async(client.search_items(query, limit))
+        results = _run_async(client.search_items(query, limit, user_name=user_name))
         if not results:
             return json.dumps({"results": [], "message": f"No items matching '{query}'"})
         return json.dumps({"results": results, "count": len(results)}, indent=2)
@@ -808,6 +810,7 @@ def mediastack_jellyfin_genres(
     media_type: str | None = None,
     genre: str | None = None,
     limit: int = 50,
+    user_name: str | None = None,
 ) -> str:
     """List Jellyfin genres or browse items by genre.
 
@@ -819,6 +822,7 @@ def mediastack_jellyfin_genres(
         media_type: Filter by type — Movie, Series, Audio (optional)
         genre: Genre name to browse items for (optional)
         limit: Maximum items when browsing by genre (default 50)
+        user_name: Jellyfin user name to query as (default: primary admin)
     """
     client = _get_poller_client("jellyfin")
     if not client:
@@ -826,7 +830,7 @@ def mediastack_jellyfin_genres(
 
     try:
         if genre:
-            items = _run_async(client.get_items_by_genre(genre, media_type, limit))
+            items = _run_async(client.get_items_by_genre(genre, media_type, limit, user_name=user_name))
             return json.dumps({
                 "genre": genre,
                 "items": items,
@@ -846,19 +850,21 @@ def mediastack_jellyfin_genres(
 def mediastack_jellyfin_favorites(
     media_type: str | None = None,
     limit: int = 50,
+    user_name: str | None = None,
 ) -> str:
-    """List the current user's Jellyfin favourites.
+    """List a user's Jellyfin favourites.
 
     Args:
         media_type: Filter by type — Movie, Series, Audio (optional)
         limit: Maximum items to return (default 50)
+        user_name: Jellyfin user name (default: primary admin). e.g. "Clive", "Pete"
     """
     client = _get_poller_client("jellyfin")
     if not client:
         return json.dumps({"error": "Jellyfin is not configured"})
 
     try:
-        results = _run_async(client.get_favorites(media_type, limit))
+        results = _run_async(client.get_favorites(media_type, limit, user_name=user_name))
         if not results:
             return json.dumps({"results": [], "message": "No favourites found"})
         return json.dumps({"results": results, "count": len(results)}, indent=2)
@@ -869,6 +875,7 @@ def mediastack_jellyfin_favorites(
 @mcp_app.tool()
 def mediastack_jellyfin_favorite(
     item_id: str, item_name: str, favorite: bool = True,
+    user_name: str | None = None,
 ) -> str:
     """Add or remove a Jellyfin item from favourites. Requires confirmation.
 
@@ -878,6 +885,7 @@ def mediastack_jellyfin_favorite(
         item_id: Jellyfin item ID (from search results)
         item_name: Item name (for confirmation display)
         favorite: True to add to favourites, False to remove (default True)
+        user_name: Jellyfin user name (default: primary admin)
     """
     client = _get_poller_client("jellyfin")
     if not client:
@@ -894,7 +902,7 @@ def mediastack_jellyfin_favorite(
     }
 
     async def execute():
-        return await client.set_favorite(item_id, favorite)
+        return await client.set_favorite(item_id, favorite, user_name=user_name)
 
     action = confirmation_store.create(description, preview, execute)
     return json.dumps({
@@ -907,6 +915,7 @@ def mediastack_jellyfin_favorite(
 @mcp_app.tool()
 def mediastack_jellyfin_watched(
     item_id: str, item_name: str, played: bool = True,
+    user_name: str | None = None,
 ) -> str:
     """Mark a Jellyfin item as played or unplayed. Requires confirmation.
 
@@ -916,6 +925,7 @@ def mediastack_jellyfin_watched(
         item_id: Jellyfin item ID (from search results)
         item_name: Item name (for confirmation display)
         played: True to mark as played, False for unplayed (default True)
+        user_name: Jellyfin user name (default: primary admin)
     """
     client = _get_poller_client("jellyfin")
     if not client:
@@ -932,7 +942,7 @@ def mediastack_jellyfin_watched(
     }
 
     async def execute():
-        return await client.set_played(item_id, played)
+        return await client.set_played(item_id, played, user_name=user_name)
 
     action = confirmation_store.create(description, preview, execute)
     return json.dumps({
