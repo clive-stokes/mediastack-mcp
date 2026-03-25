@@ -75,6 +75,28 @@ class JellyfinClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def post(self, path: str, json_data: dict | None = None,
+                   params: dict | None = None) -> Any:
+        """POST request to the Jellyfin API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.post(url, headers=self._headers(),
+                                     json=json_data, params=params)
+            resp.raise_for_status()
+            if resp.status_code == 204 or not resp.content:
+                return {"status": "ok"}
+            return resp.json()
+
+    async def delete(self, path: str, params: dict | None = None) -> Any:
+        """DELETE request to the Jellyfin API."""
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            resp = await client.delete(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            if resp.status_code == 204 or not resp.content:
+                return {"status": "ok"}
+            return resp.json()
+
     async def ping(self) -> bool:
         try:
             await self.get("/System/Info")

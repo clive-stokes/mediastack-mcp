@@ -28,7 +28,7 @@ Every write operation requires explicit confirmation before execution. Destructi
 | Lidarr | history | artists + size | warnings | add, delete, search |
 | Prowlarr | — | — | warnings | — |
 | Bazarr | subtitle history | — | warnings | subtitle search |
-| Jellyfin | — | per-library counts | ping | — |
+| Jellyfin | — | per-library counts | ping | favourite, watched, collections, playlists |
 | Seerr | request pipeline | — | ping | request, cancel |
 | Audiobookshelf | — | books + podcasts | ping | — |
 | Boxarr | scheduler runs | — | ping | — |
@@ -39,7 +39,7 @@ Every write operation requires explicit confirmation before execution. Destructi
 
 Services are auto-discovered from environment variables. Missing services are silently skipped.
 
-## MCP Tools (16)
+## MCP Tools (27)
 
 ### Read
 - `mediastack_timeline` — Recent events from all sources
@@ -60,6 +60,19 @@ Services are auto-discovered from environment variables. Missing services are si
 - `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
 - `mediastack_cancel_request` — Cancel a Seerr request
 - `mediastack_confirm` — Execute a previewed write action
+
+### Jellyfin
+- `mediastack_jellyfin_search` — Search Jellyfin library by name
+- `mediastack_jellyfin_genres` — List genres or browse items by genre
+- `mediastack_jellyfin_favorites` — List a user's favourites (optional `user_name`)
+- `mediastack_jellyfin_collections` — List collections or items in a collection
+- `mediastack_jellyfin_playlists` — List playlists or items in a playlist
+- `mediastack_jellyfin_favorite` — Add/remove item from favourites
+- `mediastack_jellyfin_watched` — Mark item as played/unplayed
+- `mediastack_jellyfin_collection_create` — Create a new collection
+- `mediastack_jellyfin_collection_modify` — Add/remove items from a collection
+- `mediastack_jellyfin_playlist_create` — Create a new playlist
+- `mediastack_jellyfin_playlist_modify` — Add/remove/reorder playlist items
 
 ## Quick Start
 
@@ -157,7 +170,7 @@ For non-HTTPS connections, add `"--allow-http"` to the args.
 
 ```
 app/
-├── server.py           # FastMCP server, 16 tools, /health endpoint
+├── server.py           # FastMCP server, 27 tools, /health endpoint
 ├── config.py           # Service auto-discovery from env vars
 ├── db.py               # PostgreSQL schema + queries
 ├── poller.py           # Background polling engine

@@ -52,7 +52,9 @@ class Poller:
             elif name == "bazarr":
                 self._clients["bazarr"] = BazarrClient(svc.url, svc.api_key)
             elif name == "jellyfin":
-                self._clients["jellyfin"] = JellyfinClient(svc.url, svc.api_key)
+                import os
+                jf_user = os.environ.get("JELLYFIN_USER_ID") or None
+                self._clients["jellyfin"] = JellyfinClient(svc.url, svc.api_key, user_id=jf_user)
             elif name == "seerr":
                 self._clients["seerr"] = SeerrClient(svc.url, svc.api_key)
             elif name == "audiobookshelf":
