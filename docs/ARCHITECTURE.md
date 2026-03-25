@@ -142,7 +142,7 @@ FROM library_snapshots ORDER BY source, library_name;
 
 ## MCP Tools
 
-### Read Tools (9)
+### Read Tools (12)
 
 | Tool | Description | Key Parameters |
 |---|---|---|
@@ -155,6 +155,9 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_summary` | Condensed digest for briefings | `period` (day/week/month) |
 | `mediastack_jellyfin_search` | Search Jellyfin library by name | `query`, `limit` |
 | `mediastack_jellyfin_genres` | List genres or browse items by genre | `media_type`, `genre`, `limit` |
+| `mediastack_jellyfin_favorites` | List current user's favourites | `media_type`, `limit` |
+| `mediastack_jellyfin_collections` | List collections or items in one | `collection_id`, `limit` |
+| `mediastack_jellyfin_playlists` | List playlists or items in one | `playlist_id`, `limit` |
 
 ### Write Tools (14, all require confirmation)
 

@@ -41,7 +41,7 @@ app/
 
 ## MCP Tools
 
-### Read (9 tools)
+### Read (12 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
@@ -51,6 +51,9 @@ app/
 - `mediastack_summary` — Condensed digest for media-brief skill
 - `mediastack_jellyfin_search` — Search Jellyfin library by name
 - `mediastack_jellyfin_genres` — List genres or browse items by genre
+- `mediastack_jellyfin_favorites` — List current user's favourites
+- `mediastack_jellyfin_collections` — List collections or items in a collection
+- `mediastack_jellyfin_playlists` — List playlists or items in a playlist
 
 ### Write (14 tools, all require confirmation)
 - `mediastack_search_content` — Search *arr lookup APIs

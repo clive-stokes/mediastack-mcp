@@ -39,7 +39,7 @@ Every write operation requires explicit confirmation before execution. Destructi
 
 Services are auto-discovered from environment variables. Missing services are silently skipped.
 
-## MCP Tools (24)
+## MCP Tools (27)
 
 ### Read
 - `mediastack_timeline` — Recent events from all sources
@@ -64,6 +64,9 @@ Services are auto-discovered from environment variables. Missing services are si
 ### Jellyfin
 - `mediastack_jellyfin_search` — Search Jellyfin library by name
 - `mediastack_jellyfin_genres` — List genres or browse items by genre
+- `mediastack_jellyfin_favorites` — List current user's favourites
+- `mediastack_jellyfin_collections` — List collections or items in a collection
+- `mediastack_jellyfin_playlists` — List playlists or items in a playlist
 - `mediastack_jellyfin_favorite` — Add/remove item from favourites
 - `mediastack_jellyfin_watched` — Mark item as played/unplayed
 - `mediastack_jellyfin_collection_create` — Create a new collection
@@ -167,7 +170,7 @@ For non-HTTPS connections, add `"--allow-http"` to the args.
 
 ```
 app/
-├── server.py           # FastMCP server, 24 tools, /health endpoint
+├── server.py           # FastMCP server, 27 tools, /health endpoint
 ├── config.py           # Service auto-discovery from env vars
 ├── db.py               # PostgreSQL schema + queries
 ├── poller.py           # Background polling engine
