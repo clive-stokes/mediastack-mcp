@@ -153,9 +153,9 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_stats` | Database statistics | — |
 | `mediastack_libraries` | Library sizes and deltas | `source`, `include_delta` |
 | `mediastack_summary` | Condensed digest for briefings | `period` (day/week/month) |
-| `mediastack_jellyfin_search` | Search Jellyfin library by name | `query`, `limit` |
-| `mediastack_jellyfin_genres` | List genres or browse items by genre | `media_type`, `genre`, `limit` |
-| `mediastack_jellyfin_favorites` | List current user's favourites | `media_type`, `limit` |
+| `mediastack_jellyfin_search` | Search Jellyfin library by name | `query`, `limit`, `user_name` |
+| `mediastack_jellyfin_genres` | List genres or browse items by genre | `media_type`, `genre`, `limit`, `user_name` |
+| `mediastack_jellyfin_favorites` | List a user's favourites | `media_type`, `limit`, `user_name` |
 | `mediastack_jellyfin_collections` | List collections or items in one | `collection_id`, `limit` |
 | `mediastack_jellyfin_playlists` | List playlists or items in one | `playlist_id`, `limit` |
 
@@ -171,8 +171,8 @@ FROM library_snapshots ORDER BY source, library_name;
 | `mediastack_search_subtitles` | Trigger Bazarr subtitle search | `media_type`, `item_id`, `language` |
 | `mediastack_delete_content` | Remove from Sonarr/Radarr/Lidarr | `media_type`, `item_id`, `delete_files` |
 | `mediastack_cancel_request` | Cancel a Seerr request | `request_id` |
-| `mediastack_jellyfin_favorite` | Add/remove Jellyfin favourite | `item_id`, `item_name`, `favorite` |
-| `mediastack_jellyfin_watched` | Mark played/unplayed | `item_id`, `item_name`, `played` |
+| `mediastack_jellyfin_favorite` | Add/remove Jellyfin favourite | `item_id`, `item_name`, `favorite`, `user_name` |
+| `mediastack_jellyfin_watched` | Mark played/unplayed | `item_id`, `item_name`, `played`, `user_name` |
 | `mediastack_jellyfin_collection_create` | Create a Jellyfin collection | `name`, `item_ids` |
 | `mediastack_jellyfin_collection_modify` | Modify collection items | `collection_id`, `add_ids`, `remove_ids` |
 | `mediastack_jellyfin_playlist_create` | Create a Jellyfin playlist | `name`, `item_ids`, `media_type` |
@@ -229,6 +229,44 @@ Content deletion uses a tiered safety model:
 ```
 > mediastack_summary(period="day")
 < Events by source, storage deltas, health status, library changes
+```
+
+### "Show me Clive's favourites"
+```
+> mediastack_jellyfin_favorites(user_name="Clive")
+< 44 items: Coldplay - Extended Set, Two Doors Down, Ghosts S01E01, ...
+```
+
+### "What Comedy movies are in Jellyfin?"
+```
+> mediastack_jellyfin_genres(genre="Comedy", media_type="Movie", limit=10)
+< 10 items: The Hangover (2009), Bridesmaids (2011), ...
+```
+
+### "Search Jellyfin for Bear"
+```
+> mediastack_jellyfin_search(query="Bear", limit=5)
+< Results with item_id, name, year, type, is_favourite, is_played
+> mediastack_jellyfin_favorite(item_id="3ae632a6...", item_name="Bear", favorite=true)
+< Preview: Add to favourites: 'Bear'. Confirm? [def456]
+> mediastack_confirm(confirmation_id="def456")
+< Done.
+```
+
+### "Create a playlist of action films"
+```
+> mediastack_jellyfin_genres(genre="Action", media_type="Movie", limit=5)
+< item_ids for 5 action movies
+> mediastack_jellyfin_playlist_create(name="Action Night", item_ids="id1,id2,id3")
+< Preview: Create video playlist 'Action Night' with 3 items. Confirm? [ghi789]
+> mediastack_confirm(confirmation_id="ghi789")
+< Done. Playlist created.
+```
+
+### "Show me Pete's favourites"
+```
+> mediastack_jellyfin_favorites(user_name="Pete")
+< 0 items — Pete has no favourites.
 ```
 
 ---

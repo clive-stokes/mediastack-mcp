@@ -64,7 +64,7 @@ Services are auto-discovered from environment variables. Missing services are si
 ### Jellyfin
 - `mediastack_jellyfin_search` — Search Jellyfin library by name
 - `mediastack_jellyfin_genres` — List genres or browse items by genre
-- `mediastack_jellyfin_favorites` — List current user's favourites
+- `mediastack_jellyfin_favorites` — List a user's favourites (optional `user_name`)
 - `mediastack_jellyfin_collections` — List collections or items in a collection
 - `mediastack_jellyfin_playlists` — List playlists or items in a playlist
 - `mediastack_jellyfin_favorite` — Add/remove item from favourites
