@@ -6,14 +6,17 @@ from .base import JellyfinClient as BaseJellyfinClient
 class JellyfinClient(BaseJellyfinClient):
     """Extended Jellyfin client for MediaStack."""
 
-    def __init__(self, url: str, api_key: str):
+    def __init__(self, url: str, api_key: str, user_id: str | None = None):
         super().__init__(url, api_key)
-        self._user_id: str | None = None
+        self._user_id: str | None = user_id
 
     # -- User ID (lazily cached) --
 
     async def get_user_id(self) -> str:
-        """Fetch and cache the user ID. Tries /Users/Me first, falls back to first admin user."""
+        """Fetch and cache the user ID.
+
+        Priority: JELLYFIN_USER_ID env var > /Users/Me > first non-generic admin > first admin.
+        """
         if self._user_id is None:
             try:
                 data = await self.get("/Users/Me")
@@ -21,12 +24,14 @@ class JellyfinClient(BaseJellyfinClient):
             except Exception:
                 # Server API keys don't support /Users/Me — fall back to user list
                 users = await self.get("/Users")
-                # Prefer admin user, otherwise first user
-                for user in users:
-                    if user.get("Policy", {}).get("IsAdministrator"):
-                        self._user_id = user["Id"]
-                        break
-                if self._user_id is None and users:
+                admins = [u for u in users if u.get("Policy", {}).get("IsAdministrator")]
+                # Prefer a named admin over the generic "admin" account
+                named_admins = [u for u in admins if u["Name"].lower() != "admin"]
+                if named_admins:
+                    self._user_id = named_admins[0]["Id"]
+                elif admins:
+                    self._user_id = admins[0]["Id"]
+                elif users:
                     self._user_id = users[0]["Id"]
                 if self._user_id is None:
                     raise RuntimeError("No Jellyfin users found")
