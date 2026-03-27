@@ -257,6 +257,8 @@ This project was designed and implemented entirely using [Claude](https://claude
 
 The human contribution was the product vision, requirements, and iterative feedback — Claude handled the engineering.
 
+I built this for my own use and as an experiment in agentic development. I hope you may find it useful.
+
 ## License
 
 [MIT](LICENSE)
