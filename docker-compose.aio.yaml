@@ -1,0 +1,84 @@
+# MediaStack MCP — All-in-One (SQLite)
+#
+# Single container, no external database dependency.
+# Usage: docker compose -f docker-compose.aio.yaml up -d
+#
+# For PostgreSQL mode, use the standard docker-compose.yaml instead.
+
+services:
+  mediastack:
+    build: .
+    container_name: mediastack-mcp
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+      DB_ENGINE: sqlite
+      DB_SQLITE_PATH: /data/mediastack.db
+
+      # Add your services below (only configured services are polled).
+      # Sonarr
+      # SONARR_URL: http://sonarr:8989
+      # SONARR_API_KEY: your_key
+
+      # Radarr
+      # RADARR_URL: http://radarr:7878
+      # RADARR_API_KEY: your_key
+
+      # Lidarr
+      # LIDARR_URL: http://lidarr:8686
+      # LIDARR_API_KEY: your_key
+
+      # Prowlarr
+      # PROWLARR_URL: http://prowlarr:9696
+      # PROWLARR_API_KEY: your_key
+
+      # Bazarr
+      # BAZARR_URL: http://bazarr:6767
+      # BAZARR_API_KEY: your_key
+
+      # Jellyfin
+      # JELLYFIN_URL: http://jellyfin:8096
+      # JELLYFIN_API_KEY: your_key
+
+      # Seerr / Overseerr
+      # SEERR_URL: http://seerr:5055
+      # SEERR_API_KEY: your_key
+
+      # SABnzbd
+      # SABNZBD_URL: http://sabnzbd:8080
+      # SABNZBD_API_KEY: your_key
+
+      # qBittorrent
+      # QBITTORRENT_URL: http://qbittorrent:8081
+      # QBITTORRENT_USERNAME: admin
+      # QBITTORRENT_PASSWORD: your_password
+
+      # Audiobookshelf
+      # AUDIOBOOKSHELF_URL: http://audiobookshelf:80
+      # AUDIOBOOKSHELF_API_KEY: your_key
+
+      # Boxarr (no auth)
+      # BOXARR_URL: http://boxarr:8888
+
+      # Dispatcharr (JWT auth)
+      # DISPATCHARR_URL: http://dispatcharr:9191
+      # DISPATCHARR_USERNAME: admin
+      # DISPATCHARR_PASSWORD: your_password
+
+      # Suggestarr (JWT auth)
+      # SUGGESTARR_URL: http://suggestarr:5000
+      # SUGGESTARR_USERNAME: admin
+      # SUGGESTARR_PASSWORD: your_password
+    ports:
+      - "127.0.0.1:9202:8000"
+    volumes:
+      - mediastack-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mediastack-data:
+    name: mediastack-data

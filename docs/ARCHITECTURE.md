@@ -8,7 +8,7 @@ Unified MCP server for home media stacks. Observes events, storage, and health a
 
 MediaStack MCP has two roles:
 
-1. **Observer** — Polls services on a schedule, records events/storage/health to PostgreSQL, and exposes read tools for agents and humans to query.
+1. **Observer** — Polls services on a schedule, records events/storage/health to a database (PostgreSQL or SQLite), and exposes read tools for agents and humans to query.
 2. **Actor** — Provides controlled write operations (add content, request via Seerr, trigger searches) with a two-step confirmation protocol. No action executes without explicit confirmation.
 
 MediaStack does **not** restart containers, modify service configurations, or perform any infrastructure-level operations. It operates at the content layer only.
@@ -22,7 +22,7 @@ MediaStack does **not** restart containers, modify service configurations, or pe
 │                        Your Server                             │
 │                                                                │
 │  ┌────────────────┐         ┌──────────────────────────┐      │
-│  │  MediaStack MCP │────────▶│ PostgreSQL (mediastack)  │      │
+│  │  MediaStack MCP │────────▶│ PostgreSQL or SQLite     │      │
 │  │  (FastMCP)      │         │ 4 tables, daily rollup   │      │
 │  │  Port 8000      │         └──────────────────────────┘      │
 │  └──────┬─────────┘                                            │
@@ -62,7 +62,9 @@ mediastack-mcp/
 └── app/
     ├── server.py           # FastMCP server, 14 MCP tools, /health endpoint
     ├── config.py           # Service auto-discovery from env vars
-    ├── db.py               # PostgreSQL schema + queries (4 tables)
+    ├── db.py               # Database router (PostgreSQL or SQLite)
+    ├── db_postgres.py      # PostgreSQL implementation
+    ├── db_sqlite.py        # SQLite implementation (AIO mode)
     ├── poller.py           # Background polling engine (daemon thread, 6 loops)
     ├── confirmations.py    # Two-step write confirmation protocol (5-min expiry)
     ├── retention.py        # Data rollup (90d events, 14d storage)
@@ -344,7 +346,7 @@ docker exec mediastack-mcp python -c "from app.retention import run_retention; p
 | Decision | Rationale |
 |---|---|
 | Polling, not webhooks | Simpler, resilient to service restarts, no *arr webhook config needed |
-| PostgreSQL, not SQLite | Concurrent access, JSONB for flexible metadata, existing infrastructure |
+| Dual-engine (PostgreSQL + SQLite) | PostgreSQL for existing setups (JSONB, concurrent access); SQLite AIO for zero-dependency deployment |
 | source_event_id dedup | Prevents duplicate events when polling overlapping time windows |
 | Sparse health table | Only records state changes, not every 5-min ping |
 | qBit state diffing | qBittorrent has no history API — detect transitions by comparing torrent lists |

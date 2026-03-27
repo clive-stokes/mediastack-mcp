@@ -76,29 +76,41 @@ Services are auto-discovered from environment variables. Missing services are si
 
 ## Quick Start
 
-### Prerequisites
-- Docker and Docker Compose
-- PostgreSQL (for event/storage/health data)
-- At least one *arr service running
+### Option A: SQLite (All-in-One — recommended for new users)
 
-### 1. Create the database
+No external database required. Single container, single volume.
 
 ```bash
+# 1. Clone and configure
+git clone https://github.com/clive-stokes/mediastack-mcp.git
+cd mediastack-mcp
+
+# 2. Edit docker-compose.aio.yaml — uncomment your services and add API keys
+
+# 3. Build and run
+docker compose -f docker-compose.aio.yaml build
+docker compose -f docker-compose.aio.yaml up -d
+
+# 4. Verify
+curl http://127.0.0.1:9202/health
+```
+
+### Option B: PostgreSQL (for existing database setups)
+
+```bash
+# 1. Create database
 docker exec postgres psql -U postgres \
   -c "CREATE USER mediastack WITH PASSWORD 'your_password';" \
   -c "CREATE DATABASE mediastack OWNER mediastack;"
-```
 
-### 2. Configure environment
-
-```bash
+# 2. Configure environment
 cd mediastack-mcp
 cp .env.example .env  # or symlink to your shared env file
 ```
 
 Required variables:
 ```env
-# Database
+# Database (PostgreSQL is the default engine)
 DB_MEDIASTACK_NAME=mediastack
 DB_MEDIASTACK_USER=mediastack
 DB_MEDIASTACK_PASS=your_password
@@ -113,16 +125,12 @@ RADARR_API_KEY=your_key
 # ... etc
 ```
 
-### 3. Build and run
-
 ```bash
+# 3. Build and run
 docker compose build
 docker compose up -d
-```
 
-### 4. Verify
-
-```bash
+# 4. Verify
 curl http://127.0.0.1:9202/health
 ```
 

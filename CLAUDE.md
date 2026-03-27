@@ -6,7 +6,7 @@ Unified MCP server for the NASgnolia media stack. Observes events, storage, and 
 
 - **Language:** Python 3.11
 - **Protocol:** MCP via FastMCP (streamable-http transport)
-- **Database:** PostgreSQL (existing NASgnolia instance)
+- **Database:** PostgreSQL (default) or SQLite (AIO mode via `DB_ENGINE=sqlite`)
 - **HTTP client:** httpx (async)
 - **Deployment:** Docker container on NASgnolia, port 9202
 
@@ -18,7 +18,9 @@ app/
 ├── __main__.py         # Entry point
 ├── server.py           # FastMCP server, 14 MCP tools, health endpoint
 ├── config.py           # Service auto-discovery from env vars
-├── db.py               # PostgreSQL schema, queries, event storage
+├── db.py               # Database router (delegates to db_postgres or db_sqlite)
+├── db_postgres.py      # PostgreSQL implementation
+├── db_sqlite.py        # SQLite implementation (AIO mode)
 ├── poller.py           # Background polling engine (daemon thread)
 ├── confirmations.py    # Two-step write confirmation protocol
 ├── retention.py        # Data retention rollup (90d events, 14d storage)

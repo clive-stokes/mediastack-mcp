@@ -41,15 +41,19 @@ class Config:
     def from_env(cls) -> "Config":
         cfg = cls()
 
-        # Database URL
-        cfg.db_url = os.environ.get(
-            "MEDIASTACK_DB_URL",
-            f"postgresql://{os.environ.get('DB_MEDIASTACK_USER', 'mediastack')}"
-            f":{os.environ.get('DB_MEDIASTACK_PASS', '')}"
-            f"@{os.environ.get('POSTGRES_HOST', 'postgres')}"
-            f":{os.environ.get('POSTGRES_PORT', '5432')}"
-            f"/{os.environ.get('DB_MEDIASTACK_NAME', 'mediastack')}",
-        )
+        # Database — SQLite (AIO) or PostgreSQL
+        cfg.db_engine = os.environ.get("DB_ENGINE", "postgres").lower()
+        if cfg.db_engine == "sqlite":
+            cfg.db_url = os.environ.get("DB_SQLITE_PATH", "/data/mediastack.db")
+        else:
+            cfg.db_url = os.environ.get(
+                "MEDIASTACK_DB_URL",
+                f"postgresql://{os.environ.get('DB_MEDIASTACK_USER', 'mediastack')}"
+                f":{os.environ.get('DB_MEDIASTACK_PASS', '')}"
+                f"@{os.environ.get('POSTGRES_HOST', 'postgres')}"
+                f":{os.environ.get('POSTGRES_PORT', '5432')}"
+                f"/{os.environ.get('DB_MEDIASTACK_NAME', 'mediastack')}",
+            )
 
         # Polling intervals
         cfg.poll_interval = int(os.environ.get("MEDIASTACK_POLL_INTERVAL", "300"))
