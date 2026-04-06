@@ -5,6 +5,7 @@ import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -31,7 +32,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-mcp_app = FastMCP("MediaStack", json_response=True, host="0.0.0.0", port=8000)
+_ICON = ("data:image/svg+xml;base64,"
+    "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0"
+    "OCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1s"
+    "aW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHJlY3QgeD0iNCIgeT0iOCIg"
+    "d2lkdGg9IjQwIiBoZWlnaHQ9IjMyIiByeD0iMyIvPjxyZWN0IHg9IjQiIHk9IjgiIHdpZHRoPSI4"
+    "IiBoZWlnaHQ9IjMyIi8+PHJlY3QgeD0iMzYiIHk9IjgiIHdpZHRoPSI4IiBoZWlnaHQ9IjMyIi8+"
+    "PGxpbmUgeDE9IjQiIHkxPSIxNiIgeDI9IjEyIiB5Mj0iMTYiLz48bGluZSB4MT0iNCIgeTE9IjI0"
+    "IiB4Mj0iMTIiIHkyPSIyNCIvPjxsaW5lIHgxPSI0IiB5MT0iMzIiIHgyPSIxMiIgeTI9IjMyIi8+"
+    "PGxpbmUgeDE9IjM2IiB5MT0iMTYiIHgyPSI0NCIgeTI9IjE2Ii8+PGxpbmUgeDE9IjM2IiB5MT0i"
+    "MjQiIHgyPSI0NCIgeTI9IjI0Ii8+PGxpbmUgeDE9IjM2IiB5MT0iMzIiIHgyPSI0NCIgeTI9IjMy"
+    "Ii8+PHBvbHlnb24gcG9pbnRzPSIyMCwxNiAyMCwzMiAzMiwyNCIgZmlsbD0iIzNiODJmNiIvPjwv"
+    "c3ZnPgo=")
+
+mcp_app = FastMCP(
+    "MediaStack",
+    json_response=True,
+    host="0.0.0.0",
+    port=8000,
+    icons=[Icon(src=_ICON, mimeType="image/svg+xml")],
+)
 
 # Global state
 _config: Config | None = None
