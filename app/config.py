@@ -37,6 +37,9 @@ class Config:
     arr_services: dict[str, ServiceConfig] = field(default_factory=dict)
     credential_services: dict[str, CredentialConfig] = field(default_factory=dict)
 
+    # Prowlarr Newznab category mapping — overridable via PROWLARR_CATEGORIES_<TYPE>
+    prowlarr_categories: dict[str, list[int]] = field(default_factory=dict)
+
     @classmethod
     def from_env(cls) -> "Config":
         cfg = cls()
@@ -73,6 +76,25 @@ class Config:
             key = os.environ.get(key_var)
             if url and key:
                 cfg.arr_services[name] = ServiceConfig(name=name, url=url.rstrip("/"), api_key=key)
+
+        # Prowlarr Newznab category defaults; override with PROWLARR_CATEGORIES_<TYPE>
+        default_prowlarr_cats = {
+            "movie": [2000],
+            "tv": [5000],
+            "music": [3000],
+            "book": [7000, 8000],
+        }
+        for media_type, default in default_prowlarr_cats.items():
+            raw = os.environ.get(f"PROWLARR_CATEGORIES_{media_type.upper()}")
+            if raw:
+                try:
+                    cfg.prowlarr_categories[media_type] = [
+                        int(x.strip()) for x in raw.split(",") if x.strip()
+                    ]
+                except ValueError:
+                    cfg.prowlarr_categories[media_type] = default
+            else:
+                cfg.prowlarr_categories[media_type] = default
 
         # Credential-based services
         sab_url = os.environ.get("SABNZBD_URL")
