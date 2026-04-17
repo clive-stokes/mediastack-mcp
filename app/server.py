@@ -594,6 +594,144 @@ def mediastack_search_subtitles(
     }, indent=2)
 
 
+@mcp_app.tool()
+def mediastack_prowlarr_search(
+    query: str,
+    indexers: list[str] | None = None,
+    media_type: str | int | None = None,
+    categories: list[int] | None = None,
+    limit: int = 20,
+) -> str:
+    """Search Prowlarr's configured indexers (nzbgeek, drunkenslug, etc.).
+
+    Unified search across every indexer Prowlarr manages — no need for
+    per-indexer credentials here. Results are normalised across NZB and
+    torrent sources.
+
+    Args:
+        query: Search term.
+        indexers: Optional list of indexer names (case-insensitive). Defaults
+            to all enabled indexers.
+        media_type: Friendly label ("movie", "tv", "music", "book") resolved
+            to Newznab category IDs via config, or a raw Newznab category
+            number (e.g. 6000 for XXX, 2040 for Movies/HD). Numeric strings
+            like "6000" are accepted.
+        categories: Explicit Newznab category IDs; overrides media_type.
+        limit: Max releases to return (default 20).
+    """
+    client = _get_poller_client("prowlarr")
+    if not client:
+        return json.dumps({"error": "prowlarr is not configured"})
+
+    try:
+        indexer_ids: list[int] | None = None
+        if indexers:
+            all_indexers = _run_async(client.get_indexers())
+            wanted = {n.lower() for n in indexers}
+            matches = [
+                i for i in all_indexers
+                if i.get("enable") and i.get("name", "").lower() in wanted
+            ]
+            if not matches:
+                available = sorted(
+                    i.get("name") for i in all_indexers if i.get("enable")
+                )
+                return json.dumps({
+                    "error": f"No enabled Prowlarr indexer matched {indexers}",
+                    "available": available,
+                })
+            indexer_ids = [i["id"] for i in matches]
+
+        resolved_categories: list[int] | None = None
+        if categories:
+            resolved_categories = list(categories)
+        elif media_type is not None:
+            if isinstance(media_type, int):
+                resolved_categories = [media_type]
+            else:
+                mt_str = str(media_type).strip()
+                if mt_str.isdigit():
+                    resolved_categories = [int(mt_str)]
+                elif _config and mt_str.lower() in _config.prowlarr_categories:
+                    resolved_categories = _config.prowlarr_categories[mt_str.lower()]
+                else:
+                    return json.dumps({
+                        "error": f"Unknown media_type '{media_type}'. Use a label "
+                                 f"(movie/tv/music/book) or a Newznab category number.",
+                    })
+
+        releases = _run_async(client.search(
+            query,
+            indexer_ids=indexer_ids,
+            categories=resolved_categories,
+        ))
+
+        slim = []
+        for r in releases[:limit]:
+            entry = {
+                "title": r.get("title"),
+                "indexer": r.get("indexer"),
+                "indexer_id": r.get("indexerId"),
+                "guid": r.get("guid"),
+                "size": _format_bytes(r.get("size") or 0),
+                "categories": [
+                    c.get("name") for c in (r.get("categories") or [])
+                    if c.get("name")
+                ],
+            }
+            if r.get("ageDays") is not None:
+                entry["age_days"] = r["ageDays"]
+            elif r.get("age") is not None:
+                entry["age_days"] = r["age"]
+            if r.get("seeders") is not None:
+                entry["seeders"] = r["seeders"]
+                entry["leechers"] = r.get("leechers")
+            if r.get("grabs") is not None:
+                entry["grabs"] = r["grabs"]
+            if r.get("infoUrl"):
+                entry["info_url"] = r["infoUrl"]
+            slim.append(entry)
+
+        return json.dumps(slim, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_prowlarr_grab(guid: str, indexer_id: int, title: str) -> str:
+    """Send a Prowlarr search result to the configured download client.
+
+    Use the `guid` and `indexer_id` fields from a mediastack_prowlarr_search
+    result. Returns a preview; requires mediastack_confirm to execute.
+
+    Args:
+        guid: Release GUID from the search result.
+        indexer_id: Prowlarr indexer ID that produced the release.
+        title: Release title (for confirmation display).
+    """
+    client = _get_poller_client("prowlarr")
+    if not client:
+        return json.dumps({"error": "prowlarr is not configured"})
+
+    preview = {
+        "action": "prowlarr_grab",
+        "title": title,
+        "indexer_id": indexer_id,
+        "guid": guid,
+    }
+    desc = f"Grab '{title}' via Prowlarr (indexer {indexer_id})"
+
+    async def execute():
+        return await client.grab(guid, indexer_id)
+
+    action = confirmation_store.create(desc, preview, execute)
+    return json.dumps({
+        "preview": preview,
+        "confirmation_id": action.confirmation_id,
+        "message": f"{desc}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+    }, indent=2)
+
+
 DELETE_FILES_EXPIRY = 120  # 2-minute expiry when files will be deleted
 
 

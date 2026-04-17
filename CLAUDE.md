@@ -27,7 +27,7 @@ app/
     ├── sonarr.py       # Sonarr API v3 (read + write)
     ├── radarr.py       # Radarr API v3 (read + write)
     ├── lidarr.py       # Lidarr API v1 (read + write)
-    ├── prowlarr.py     # Prowlarr API v1 (health + indexer stats)
+    ├── prowlarr.py     # Prowlarr API v1 (health, indexer stats, search, grab)
     ├── bazarr.py       # Bazarr API (subtitle history + search)
     ├── jellyfin.py     # Jellyfin API (library stats, search, user data, collections, playlists)
     ├── seerr.py        # Seerr API v1 (request pipeline + search)
@@ -41,7 +41,7 @@ app/
 
 ## MCP Tools
 
-### Read (12 tools)
+### Read (13 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
@@ -54,14 +54,16 @@ app/
 - `mediastack_jellyfin_favorites` — List current user's favourites
 - `mediastack_jellyfin_collections` — List collections or items in a collection
 - `mediastack_jellyfin_playlists` — List playlists or items in a playlist
+- `mediastack_prowlarr_search` — Search Prowlarr indexers (nzbgeek, drunkenslug, etc.)
 
-### Write (14 tools, all require confirmation)
+### Write (15 tools, all require confirmation)
 - `mediastack_search_content` — Search *arr lookup APIs
 - `mediastack_add_content` — Add to Sonarr/Radarr/Lidarr
 - `mediastack_list_profiles` — Show quality profiles and root folders
 - `mediastack_request_content` — Request via Seerr
 - `mediastack_search_missing` — Trigger *arr missing content search
 - `mediastack_search_subtitles` — Trigger Bazarr subtitle search
+- `mediastack_prowlarr_grab` — Send a Prowlarr release to the download client
 - `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
 - `mediastack_cancel_request` — Cancel a Seerr request
 - `mediastack_jellyfin_favorite` — Add/remove Jellyfin item from favourites
@@ -81,7 +83,7 @@ app/
 | Sonarr | history | root folders | series count | yes | add, search |
 | Radarr | history | root folders | movie count | yes | add, search |
 | Lidarr | history | root folders | artist count | yes | add, search |
-| Prowlarr | — | — | — | yes | — |
+| Prowlarr | — | — | — | yes | search, grab |
 | Bazarr | subtitle history | — | — | yes | subtitle search |
 | Jellyfin | — | — | 20 libraries | yes | favourite, watched, collections, playlists |
 | Seerr | request pipeline | — | — | yes | request |
@@ -109,3 +111,4 @@ app/
 - Content deletion uses tiered safety: library-only removal (default, 5-min expiry) vs file deletion (2-min expiry + prominent warning)
 - No bulk deletion — single item_id only, no arrays or wildcards
 - Deletion audit trail stored as `delete_confirmed` event type with full preview metadata for manual re-add
+- Prowlarr `media_type` → Newznab category mapping is configurable via `PROWLARR_CATEGORIES_<TYPE>` env vars (defaults: movie=2000, tv=5000, music=3000, book=7000,8000); raw category numbers can also be passed directly as `media_type=6000`
