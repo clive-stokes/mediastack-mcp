@@ -25,6 +25,10 @@ services:
     environment:
       TZ: ${TZ}
       PYTHONUNBUFFERED: 1
+      # Library polling schedule — fires daily at HH:MM (container local time via TZ above).
+      # Run once at startup, then wait until next occurrence. Avoids waking hibernating HDDs.
+      # Comment out to fall back to MEDIASTACK_LIBRARY_INTERVAL (default 6h).
+      MEDIASTACK_LIBRARY_CRON: "02:30"
       # Database
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

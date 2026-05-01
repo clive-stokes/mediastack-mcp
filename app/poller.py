@@ -341,7 +341,29 @@ class Poller:
                 await self._poll_libraries()
             except Exception:
                 logger.exception("Error in library polling cycle")
-            await asyncio.sleep(self.config.library_interval)
+
+            if self.config.library_cron:
+                secs = self._seconds_until_cron(self.config.library_cron)
+                logger.info(
+                    "[libraries] Next poll at %s (%.0fs)", self.config.library_cron, secs
+                )
+                await asyncio.sleep(secs)
+            else:
+                await asyncio.sleep(self.config.library_interval)
+
+    def _seconds_until_cron(self, hh_mm: str) -> float:
+        """Return seconds until the next daily occurrence of HH:MM (container local time).
+
+        If the target time has already passed today, schedules for tomorrow.
+        Relies on the container TZ env var being set correctly (e.g. TZ=Europe/London).
+        """
+        from datetime import datetime, timedelta
+        h, m = map(int, hh_mm.split(":"))
+        now = datetime.now()
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return (target - now).total_seconds()
 
     async def _poll_libraries(self) -> None:
         """Collect library size/count snapshots."""

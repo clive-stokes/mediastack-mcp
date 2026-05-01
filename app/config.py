@@ -31,7 +31,13 @@ class Config:
     # Polling intervals (seconds)
     poll_interval: int = 300       # 5 min for events
     storage_interval: int = 3600   # 1 hr for storage
-    library_interval: int = 21600  # 6 hrs for library snapshots
+    library_interval: int = 21600  # 6 hrs for library snapshots (ignored if library_cron set)
+
+    # Optional cron-style daily schedule for library polling (HH:MM, container local time).
+    # If set, the poller runs once at startup then waits until the next daily occurrence.
+    # Prevents unnecessary disk wake-ups vs a naive fixed interval.
+    # Set TZ=Europe/London in docker-compose to match wall-clock time.
+    library_cron: str | None = None
 
     # Discovered services
     arr_services: dict[str, ServiceConfig] = field(default_factory=dict)
@@ -58,6 +64,26 @@ class Config:
         cfg.poll_interval = int(os.environ.get("MEDIASTACK_POLL_INTERVAL", "300"))
         cfg.storage_interval = int(os.environ.get("MEDIASTACK_STORAGE_INTERVAL", "3600"))
         cfg.library_interval = int(os.environ.get("MEDIASTACK_LIBRARY_INTERVAL", "21600"))
+
+        # Optional daily cron schedule for library polling — takes precedence over library_interval
+        raw_cron = os.environ.get("MEDIASTACK_LIBRARY_CRON", "").strip()
+        if raw_cron:
+            # Validate HH:MM format
+            parts = raw_cron.split(":")
+            if len(parts) == 2 and all(p.isdigit() for p in parts):
+                h, m = int(parts[0]), int(parts[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    cfg.library_cron = raw_cron
+                else:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "MEDIASTACK_LIBRARY_CRON %r out of range — falling back to interval", raw_cron
+                    )
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "MEDIASTACK_LIBRARY_CRON %r is not HH:MM — falling back to interval", raw_cron
+                )
 
         # Auto-discover *arr services (URL + API_KEY pairs)
         # URL vars are set in docker-compose env; API keys come from .docker.env
