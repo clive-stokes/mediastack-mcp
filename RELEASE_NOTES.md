@@ -1,3 +1,34 @@
+# MediaStack MCP v1.1.0
+
+## Changes
+
+### Fix: Jellyfin library sizes for unmanaged libraries (#3)
+
+`mediastack_libraries` previously returned `size_bytes: 0` for any Jellyfin library
+not managed by an arr tool — Trash TV, Music Videos, Radio Shows, My Videos, and similar
+unmanaged content had no usable size data.
+
+**Root cause:** The poller explicitly set `size = 0` for all non-STRM Jellyfin libraries
+with the assumption that arr tools would cover them. They don't for content outside
+Sonarr/Radarr/Lidarr root folders.
+
+**Fix:** The Jellyfin library polling block now uses path-based detection to distinguish:
+
+- **STRM/iFiesta libraries** — `size_bytes = NULL` (negligible `.strm` text files, unchanged)
+- **Arr-managed libraries** — `size_bytes = NULL` (Sonarr/Radarr/Lidarr record accurate
+  sizes via their own poll; storing 0 from Jellyfin would be misleading)
+- **Unmanaged libraries** — `size_bytes` measured via `du -sb` on the library's filesystem
+  path, run in a thread pool to avoid blocking the event loop
+
+A library is considered arr-managed when any of its `Locations` paths (from Jellyfin's
+`/Library/VirtualFolders` API) overlap with a root folder configured in Sonarr, Radarr,
+or Lidarr.
+
+**Impact:** The `mediastack_libraries` tool now returns real sizes for unmanaged Jellyfin
+libraries, enabling accurate pie chart breakdowns of disk usage across all content types.
+
+---
+
 # MediaStack MCP v1.0.0
 
 A unified MCP server for home media stacks. Polls 13 services, records events and storage to PostgreSQL, and exposes 27 tools for AI agents to observe and manage your media library.
