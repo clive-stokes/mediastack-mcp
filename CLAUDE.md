@@ -41,7 +41,7 @@ app/
 
 ## MCP Tools
 
-### Read (13 tools)
+### Read (14 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
@@ -55,8 +55,9 @@ app/
 - `mediastack_jellyfin_collections` — List collections or items in a collection
 - `mediastack_jellyfin_playlists` — List playlists or items in a playlist
 - `mediastack_prowlarr_search` — Search Prowlarr indexers (nzbgeek, drunkenslug, etc.)
+- `mediastack_seerr_deletion_audit` — Forensic audit of media that dropped from Seerr's "available" status (e.g. after a Radarr Trakt-list deletion); returns tmdb/tvdb IDs ready for re-add
 
-### Write (15 tools, all require confirmation)
+### Write (16 tools, all require confirmation)
 - `mediastack_search_content` — Search *arr lookup APIs
 - `mediastack_add_content` — Add to Sonarr/Radarr/Lidarr
 - `mediastack_list_profiles` — Show quality profiles and root folders
@@ -66,6 +67,7 @@ app/
 - `mediastack_prowlarr_grab` — Send a Prowlarr release to the download client
 - `mediastack_delete_content` — Remove from Sonarr/Radarr/Lidarr (optional file deletion)
 - `mediastack_cancel_request` — Cancel a Seerr request
+- `mediastack_delete_seerr_media` — Delete Seerr's media tracking record (makes title re-requestable; no files touched)
 - `mediastack_jellyfin_favorite` — Add/remove Jellyfin item from favourites
 - `mediastack_jellyfin_watched` — Mark Jellyfin item as played/unplayed
 - `mediastack_jellyfin_collection_create` — Create a Jellyfin collection
@@ -86,7 +88,7 @@ app/
 | Prowlarr | — | — | — | yes | search, grab |
 | Bazarr | subtitle history | — | — | yes | subtitle search |
 | Jellyfin | — | — | 20 libraries | yes | favourite, watched, collections, playlists |
-| Seerr | request pipeline | — | — | yes | request |
+| Seerr | request pipeline | — | — | yes | request, delete-media-record |
 | SABnzbd | download history | — | — | yes | — |
 | qBittorrent | state diff | — | — | yes | — |
 | Audiobookshelf | — | — | per-library stats | yes | — |
@@ -112,3 +114,4 @@ app/
 - No bulk deletion — single item_id only, no arrays or wildcards
 - Deletion audit trail stored as `delete_confirmed` event type with full preview metadata for manual re-add
 - Prowlarr `media_type` → Newznab category mapping is configurable via `PROWLARR_CATEGORIES_<TYPE>` env vars (defaults: movie=2000, tv=5000, music=3000, book=7000,8000); raw category numbers can also be passed directly as `media_type=6000`
+- Seerr media diff: poller snapshots `/api/v1/media` each cycle and emits `seerr_media_unavailable` events when status drops from ≥4 to <4 (recovery signal for Radarr/Sonarr file deletions); in-memory prev-state map, first cycle after restart seeds without emitting
