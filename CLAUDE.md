@@ -16,8 +16,9 @@ Unified MCP server for the NASgnolia media stack. Observes events, storage, and 
 app/
 ├── __init__.py
 ├── __main__.py         # Entry point
-├── server.py           # FastMCP server, 14 MCP tools, health endpoint
+├── server.py           # FastMCP server, 18 MCP tools, health endpoint
 ├── config.py           # Service auto-discovery from env vars
+├── filesystem.py       # Filesystem scanning, path validation, orphan detection
 ├── db.py               # PostgreSQL schema, queries, event storage
 ├── poller.py           # Background polling engine (daemon thread)
 ├── confirmations.py    # Two-step write confirmation protocol
@@ -41,7 +42,7 @@ app/
 
 ## MCP Tools
 
-### Read (14 tools)
+### Read (18 tools)
 - `mediastack_timeline` — Recent events from all sources
 - `mediastack_storage` — Disk usage with growth forecasts
 - `mediastack_health` — Service health status
@@ -55,6 +56,10 @@ app/
 - `mediastack_jellyfin_collections` — List collections or items in a collection
 - `mediastack_jellyfin_playlists` — List playlists or items in a playlist
 - `mediastack_prowlarr_search` — Search Prowlarr indexers (nzbgeek, drunkenslug, etc.)
+- `mediastack_filesystem_scan` — Scan a directory for file metadata (requires FILESYSTEM_SCAN_ENABLED)
+- `mediastack_orphan_detect` — Find files on disk not tracked in Jellyfin (requires FILESYSTEM_SCAN_ENABLED)
+- `mediastack_upgrade_detect` — Detect recent Sonarr/Radarr quality upgrades
+- `mediastack_ghost_history` — Find previously downloaded files (e.g. get_iplayer) no longer on disk; classifies as relocated (in Jellyfin) or truly deleted
 - `mediastack_seerr_deletion_audit` — Forensic audit of media that dropped from Seerr's "available" status (e.g. after a Radarr Trakt-list deletion); returns tmdb/tvdb IDs ready for re-add
 
 ### Write (16 tools, all require confirmation)
@@ -113,5 +118,14 @@ app/
 - Content deletion uses tiered safety: library-only removal (default, 5-min expiry) vs file deletion (2-min expiry + prominent warning)
 - No bulk deletion — single item_id only, no arrays or wildcards
 - Deletion audit trail stored as `delete_confirmed` event type with full preview metadata for manual re-add
+- Filesystem scanning gated behind FILESYSTEM_SCAN_ENABLED=true feature flag (off by default)
+- Scan paths validated against MEDIA_ROOTS allowlist; dangerous system paths always blocked
+- Orphan detection compares filesystem vs Jellyfin /Items with Fields=Path,MediaSources
+- MEDIA_PATH_MAPPINGS translates between container paths and Jellyfin's path namespace
+- Upgrade detection queries *arr history for episodeFileDeleted/movieFileDeleted with reason=upgrade
+- Ghost history queries media_events by source + metadata JSONB filters, checks file existence on disk
+- Ghost classify=true cross-references against Jellyfin: normalises titles (strips years, tags, "The "), builds in-memory name index, matches series/episodes
+- Truly deleted entries grouped by show name to keep output compact for LLM consumption
+- GHOST_HISTORY_LIMIT controls max events queried (default 500) — prevents expensive full-table scans
 - Prowlarr `media_type` → Newznab category mapping is configurable via `PROWLARR_CATEGORIES_<TYPE>` env vars (defaults: movie=2000, tv=5000, music=3000, book=7000,8000); raw category numbers can also be passed directly as `media_type=6000`
 - Seerr media diff: poller snapshots `/api/v1/media` each cycle and emits `seerr_media_unavailable` events when status drops from ≥4 to <4 (recovery signal for Radarr/Sonarr file deletions); in-memory prev-state map, first cycle after restart seeds without emitting

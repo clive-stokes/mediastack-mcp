@@ -31,11 +31,26 @@ class Config:
     # Polling intervals (seconds)
     poll_interval: int = 300       # 5 min for events
     storage_interval: int = 3600   # 1 hr for storage
-    library_interval: int = 21600  # 6 hrs for library snapshots
+    library_interval: int = 21600  # 6 hrs for library snapshots (ignored if library_cron set)
+
+    # Optional cron-style daily schedule for library polling (HH:MM, container local time).
+    # If set, the poller runs once at startup then waits until the next daily occurrence.
+    # Prevents unnecessary disk wake-ups vs a naive fixed interval.
+    # Set TZ=Europe/London in docker-compose to match wall-clock time.
+    library_cron: str | None = None
 
     # Discovered services
     arr_services: dict[str, ServiceConfig] = field(default_factory=dict)
     credential_services: dict[str, CredentialConfig] = field(default_factory=dict)
+
+    # Filesystem scan settings
+    filesystem_scan_enabled: bool = False
+    media_roots: list[str] = field(default_factory=list)
+    # Path mappings: container path prefix -> Jellyfin path prefix
+    # e.g. {"/media/Movies": "/data/Movies", "/media/Series": "/data/TV"}
+    media_path_mappings: dict[str, str] = field(default_factory=dict)
+    # Max events to query for ghost history (default 500)
+    ghost_history_limit: int = 500
 
     # Prowlarr Newznab category mapping — overridable via PROWLARR_CATEGORIES_<TYPE>
     prowlarr_categories: dict[str, list[int]] = field(default_factory=dict)
@@ -58,6 +73,26 @@ class Config:
         cfg.poll_interval = int(os.environ.get("MEDIASTACK_POLL_INTERVAL", "300"))
         cfg.storage_interval = int(os.environ.get("MEDIASTACK_STORAGE_INTERVAL", "3600"))
         cfg.library_interval = int(os.environ.get("MEDIASTACK_LIBRARY_INTERVAL", "21600"))
+
+        # Optional daily cron schedule for library polling — takes precedence over library_interval
+        raw_cron = os.environ.get("MEDIASTACK_LIBRARY_CRON", "").strip()
+        if raw_cron:
+            # Validate HH:MM format
+            parts = raw_cron.split(":")
+            if len(parts) == 2 and all(p.isdigit() for p in parts):
+                h, m = int(parts[0]), int(parts[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    cfg.library_cron = raw_cron
+                else:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "MEDIASTACK_LIBRARY_CRON %r out of range — falling back to interval", raw_cron
+                    )
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "MEDIASTACK_LIBRARY_CRON %r is not HH:MM — falling back to interval", raw_cron
+                )
 
         # Auto-discover *arr services (URL + API_KEY pairs)
         # URL vars are set in docker-compose env; API keys come from .docker.env
@@ -137,6 +172,32 @@ class Config:
             cfg.credential_services["suggestarr"] = CredentialConfig(
                 name="suggestarr", url=sug_url.rstrip("/"), username=sug_user, password=sug_pass,
             )
+
+        # Filesystem scan feature (off by default until tested)
+        cfg.filesystem_scan_enabled = os.environ.get(
+            "FILESYSTEM_SCAN_ENABLED", "false",
+        ).lower() in ("true", "1", "yes")
+
+        # Allowed scan roots — comma-separated list of container paths
+        roots_raw = os.environ.get("MEDIA_ROOTS", "")
+        if roots_raw.strip():
+            cfg.media_roots = [r.strip().rstrip("/") for r in roots_raw.split(",") if r.strip()]
+
+        # Ghost history query limit
+        cfg.ghost_history_limit = int(os.environ.get("GHOST_HISTORY_LIMIT", "500"))
+
+        # Path mappings: container_path:jellyfin_path pairs, comma-separated
+        # e.g. "/media/Movies:/data/Movies,/media/Series:/data/TV"
+        mappings_raw = os.environ.get("MEDIA_PATH_MAPPINGS", "")
+        if mappings_raw.strip():
+            for pair in mappings_raw.split(","):
+                pair = pair.strip()
+                if ":" in pair:
+                    parts = pair.split(":", 1)
+                    container_path = parts[0].strip().rstrip("/")
+                    jellyfin_path = parts[1].strip().rstrip("/")
+                    if container_path and jellyfin_path:
+                        cfg.media_path_mappings[container_path] = jellyfin_path
 
         return cfg
 

@@ -46,6 +46,10 @@ class SabnzbdClient:
         except Exception:
             return False
 
+    async def add_url(self, nzb_url: str) -> dict:
+        """Submit NZB URL to SABnzbd."""
+        return await self._api("addurl", {"name": nzb_url})
+
     def parse_history_event(self, slot: dict) -> dict[str, Any]:
         """Normalise a SABnzbd history slot into a MediaStack event."""
         from datetime import datetime, timezone

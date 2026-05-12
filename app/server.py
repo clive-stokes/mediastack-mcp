@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
@@ -33,17 +34,20 @@ logger = logging.getLogger(__name__)
 
 mcp_app = FastMCP("MediaStack", json_response=True, host="0.0.0.0", port=8000)
 
+# Build version — increment on each deploy to verify code is loaded
+MEDIASTACK_BUILD = "2026-05-12.1"
+
 # Global state
 _config: Config | None = None
 _poller: Poller | None = None
 _poller_loop: asyncio.AbstractEventLoop | None = None
 
 
-def _run_async(coro):
+def _run_async(coro, timeout: int = 30):
     """Run an async coroutine from a sync MCP tool using the poller's event loop."""
     if _poller_loop and _poller_loop.is_running():
         future = asyncio.run_coroutine_threadsafe(coro, _poller_loop)
-        return future.result(timeout=30)
+        return future.result(timeout=timeout)
     # Fallback: create a new event loop
     return asyncio.get_event_loop().run_until_complete(coro)
 
@@ -56,12 +60,76 @@ async def health(request: Request) -> JSONResponse:
         stats = db.get_stats()
         return JSONResponse({
             "status": "ok",
+            "build": MEDIASTACK_BUILD,
             "events": stats["total_events"],
             "sources": stats["active_sources"],
             "services": _config.describe() if _config else "not initialised",
         })
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+
+
+# -- Ingest endpoint --
+
+@mcp_app.custom_route("/ingest", methods=["POST"])
+async def ingest(request: Request) -> JSONResponse:
+    """Receive a download event from an external source (e.g. get_iplayer).
+
+    Expected JSON body:
+        source      (str, required) — originating service, e.g. "get_iplayer"
+        event_type  (str, required) — e.g. "downloaded"
+        title       (str, optional) — human-readable programme title
+        metadata    (obj, optional) — arbitrary key/value pairs stored as JSONB
+
+    get_iplayer substitution variables useful in metadata:
+        pid, type, name, filename, dir, ext, episode, series
+
+    Deduplication: if metadata contains a "pid" key, source_event_id is set to
+    "{source}:{pid}" which maps to the unique index on media_events.source_event_id.
+    Re-posting the same pid is silently ignored (returns duplicate: true).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "detail": "invalid JSON body"},
+            status_code=400,
+        )
+
+    source = body.get("source")
+    event_type = body.get("event_type")
+
+    if not source or not event_type:
+        return JSONResponse(
+            {"status": "error", "detail": "source and event_type are required"},
+            status_code=400,
+        )
+
+    metadata = body.get("metadata") or {}
+    pid = metadata.get("pid")
+
+    # Build a deterministic dedup key from the pid when available.
+    # get_iplayer's pid is stable and unique per BBC programme edition.
+    source_event_id = f"{source}:{pid}" if pid else None
+
+    event = {
+        "source": source,
+        "event_type": event_type,
+        "title": body.get("title"),
+        "metadata": metadata,
+        "source_event_id": source_event_id,
+    }
+
+    inserted = db.insert_event(event)
+    logger.info(
+        "Ingest: source=%s event_type=%s title=%r inserted=%s",
+        source, event_type, body.get("title"), inserted,
+    )
+    return JSONResponse({
+        "status": "ok",
+        "inserted": inserted,
+        "duplicate": not inserted,
+    })
 
 
 # -- Phase 1 Tools: timeline, storage, health --
@@ -713,16 +781,39 @@ def mediastack_prowlarr_grab(guid: str, indexer_id: int, title: str) -> str:
     if not client:
         return json.dumps({"error": "prowlarr is not configured"})
 
+    try:
+        results = _run_async(client.get("/api/v1/search", params={
+            "query": title,
+            "type": "search",
+            "indexerIds": indexer_id,
+            "limit": 50,
+        }))
+
+        matching = next((r for r in results if r["guid"] == guid), None)
+        if not matching:
+            return json.dumps({"error": f"Release '{title}' not found in fresh search. It may have aged off the indexer."})
+
+        download_url = matching.get("downloadUrl")
+        if not download_url:
+            return json.dumps({"error": f"No download URL found for '{title}'. Indexer configuration issue."})
+    except Exception as e:
+        return json.dumps({"error": f"Failed to fetch release details: {str(e)}"})
+
     preview = {
         "action": "prowlarr_grab",
         "title": title,
         "indexer_id": indexer_id,
         "guid": guid,
+        "size": matching.get("size"),
     }
     desc = f"Grab '{title}' via Prowlarr (indexer {indexer_id})"
 
     async def execute():
-        return await client.grab(guid, indexer_id)
+        sabnzbd_client = _get_poller_client("sabnzbd")
+        if not sabnzbd_client:
+            raise ValueError("SABnzbd is not configured")
+
+        return await sabnzbd_client.add_url(download_url)
 
     action = confirmation_store.create(desc, preview, execute)
     return json.dumps({
@@ -1450,6 +1541,573 @@ def mediastack_jellyfin_playlist_modify(
         "confirmation_id": action.confirmation_id,
         "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
     }, indent=2)
+
+
+# -- Phase 5: Filesystem Tools (orphan & upgrade detection) --
+
+
+def _check_filesystem_enabled() -> str | None:
+    """Return an error JSON string if filesystem scanning is disabled, else None."""
+    if not _config or not _config.filesystem_scan_enabled:
+        return json.dumps({
+            "error": "Filesystem scanning is disabled. "
+            "Set FILESYSTEM_SCAN_ENABLED=true in .docker.env to enable.",
+        })
+    return None
+
+
+@mcp_app.tool()
+def mediastack_filesystem_scan(
+    path: str,
+    pattern: str | None = None,
+    recursive: bool = True,
+    limit: int = 500,
+) -> str:
+    """Scan a directory and return file metadata.
+
+    Walks the given path and returns a list of files with their name, size,
+    modification date, and extension. Restricted to configured MEDIA_ROOTS
+    for safety — will reject paths outside allowed roots.
+
+    Args:
+        path: Directory path to scan (must be under a configured MEDIA_ROOT)
+        pattern: Optional glob pattern to filter filenames (e.g. "*.mp4", "*.mkv")
+        recursive: Recurse into subdirectories (default True)
+        limit: Maximum files to return (default 500, max 5000)
+    """
+    from app.filesystem import validate_scan_path, scan_directory
+
+    disabled = _check_filesystem_enabled()
+    if disabled:
+        return disabled
+
+    # Validate path against allowed roots
+    error = validate_scan_path(path, _config.media_roots)
+    if error:
+        return json.dumps({"error": error})
+
+    limit = min(limit, 5000)
+
+    try:
+        files = scan_directory(path, pattern=pattern, recursive=recursive, limit=limit)
+        total_size = sum(f["size_bytes"] for f in files)
+        return json.dumps({
+            "path": path,
+            "files": files,
+            "summary": {
+                "file_count": len(files),
+                "total_size_bytes": total_size,
+                "total_size": _format_bytes(total_size),
+                "truncated": len(files) >= limit,
+            },
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_orphan_detect(
+    scan_path: str,
+    library_name: str | None = None,
+    extensions: str | None = None,
+    include_ghosts: bool = True,
+) -> str:
+    """Detect orphaned media files not tracked in Jellyfin.
+
+    Compares files on disk against Jellyfin library membership. Files
+    present on disk but absent from Jellyfin are 'orphans' — likely
+    manually downloaded content (e.g. get_iplayer) that was removed
+    from the library but not from disk.
+
+    Optionally also detects 'ghost entries' — items in Jellyfin whose
+    underlying files no longer exist on disk.
+
+    Requires FILESYSTEM_SCAN_ENABLED=true and Jellyfin to be configured.
+
+    Args:
+        scan_path: Directory to scan for media files (must be under MEDIA_ROOTS)
+        library_name: Compare against a specific Jellyfin library (optional — all libraries if omitted)
+        extensions: Comma-separated file extensions to check (default: mp4,mkv,avi,ts,m4v,m4a,mp3,flac,ogg,opus)
+        include_ghosts: Also detect Jellyfin items with missing files (default True)
+    """
+    from app.filesystem import (
+        validate_scan_path, detect_orphans, detect_ghosts,
+        build_jellyfin_path_set, PathMapper, DEFAULT_MEDIA_EXTENSIONS,
+    )
+
+    disabled = _check_filesystem_enabled()
+    if disabled:
+        return disabled
+
+    # Validate scan path
+    error = validate_scan_path(scan_path, _config.media_roots)
+    if error:
+        return json.dumps({"error": error})
+
+    # Check Jellyfin is available
+    client = _get_poller_client("jellyfin")
+    if not client:
+        return json.dumps({"error": "Jellyfin is not configured"})
+
+    # Parse extensions
+    if extensions:
+        ext_set = frozenset(e.strip().lower().lstrip(".") for e in extensions.split(",") if e.strip())
+    else:
+        ext_set = DEFAULT_MEDIA_EXTENSIONS
+
+    try:
+        # Resolve library parent_id if a specific library was requested
+        parent_id = None
+        if library_name:
+            libraries = _run_async(client.get_libraries_with_ids())
+            matches = [lib for lib in libraries if lib["name"].lower() == library_name.lower()]
+            if not matches:
+                available = [lib["name"] for lib in libraries]
+                return json.dumps({
+                    "error": f"Library '{library_name}' not found",
+                    "available_libraries": available,
+                })
+            parent_id = matches[0]["item_id"]
+
+        # Fetch all Jellyfin items with file paths
+        jellyfin_items = _run_async(client.get_library_items_with_paths(parent_id=parent_id))
+
+        # Set up path mapper if configured
+        path_mapper = None
+        if _config.media_path_mappings:
+            path_mapper = PathMapper(_config.media_path_mappings)
+
+        # Build the set of known Jellyfin paths (translated to container-space)
+        jellyfin_paths = build_jellyfin_path_set(jellyfin_items, path_mapper)
+
+        # Detect orphans: files on disk not in Jellyfin
+        orphaned_files = detect_orphans(scan_path, jellyfin_paths, extensions=ext_set)
+
+        # Optionally detect ghosts: Jellyfin items with missing files
+        ghost_entries = []
+        if include_ghosts:
+            ghost_entries = detect_ghosts(scan_path, jellyfin_items, path_mapper)
+
+        orphan_size = sum(f["size_bytes"] for f in orphaned_files)
+
+        result = {
+            "orphaned_files": orphaned_files,
+            "ghost_entries": ghost_entries,
+            "summary": {
+                "scan_path": scan_path,
+                "library_filter": library_name,
+                "extensions_checked": sorted(ext_set),
+                "total_files_scanned": len(orphaned_files) + len(jellyfin_paths),
+                "total_in_library": len(jellyfin_paths),
+                "orphan_count": len(orphaned_files),
+                "orphan_total_size_bytes": orphan_size,
+                "orphan_total_size": _format_bytes(orphan_size),
+                "ghost_count": len(ghost_entries),
+            },
+        }
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.exception("Orphan detection failed")
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_upgrade_detect(
+    source: str,
+    days: int = 30,
+    codec_filter: str | None = None,
+) -> str:
+    """Detect recent media upgrades by Sonarr or Radarr.
+
+    Queries the *arr history API for upgrade events (where a file was
+    replaced with a higher quality version). Shows old vs new quality,
+    file sizes, and total space impact.
+
+    Useful for tracking x264 → HEVC migrations, quality profile upgrades,
+    or understanding disk usage changes from automated upgrades.
+
+    Args:
+        source: Service to query — "sonarr" or "radarr"
+        days: Look-back period in days (default 30, max 365)
+        codec_filter: Optional codec/quality substring filter (e.g. "hevc", "x265", "remux")
+    """
+    if source not in ("sonarr", "radarr"):
+        return json.dumps({"error": "source must be 'sonarr' or 'radarr'"})
+
+    client = _get_poller_client(source)
+    if not client:
+        return json.dumps({"error": f"{source} is not configured"})
+
+    days = min(days, 365)
+
+    try:
+        from datetime import datetime, timedelta, timezone as tz
+
+        cutoff = datetime.now(tz.utc) - timedelta(days=days)
+
+        # Page through history to find upgrade events within the time window
+        upgrades = []
+        page = 1
+        page_size = 100
+        done = False
+
+        while not done:
+            raw_events = _run_async(client.get_history(page=page, page_size=page_size))
+            if not raw_events:
+                break
+
+            for event in raw_events:
+                event_date_str = event.get("date", "")
+                if not event_date_str:
+                    continue
+
+                # Parse the date — Sonarr/Radarr use ISO 8601
+                try:
+                    event_date = datetime.fromisoformat(event_date_str.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    continue
+
+                if event_date < cutoff:
+                    done = True
+                    break
+
+                event_type = event.get("eventType", "").lower()
+
+                # Upgrade events: episodeFileDeleted/movieFileDeleted with reason=upgrade,
+                # or downloadFolderImported with isUpgrade flag
+                is_upgrade = False
+                data = event.get("data", {})
+
+                if event_type in ("episodefiledeleted", "moviefiledeleted"):
+                    if data.get("reason", "").lower() == "upgrade":
+                        is_upgrade = True
+                elif event_type in ("downloadfolderimported",):
+                    # The droppedPath/importedPath data indicates an upgrade
+                    # when there's size info from before
+                    pass
+
+                if not is_upgrade:
+                    continue
+
+                # Extract quality info
+                quality = event.get("quality", {}).get("quality", {})
+                quality_name = quality.get("name", "Unknown")
+
+                # Apply codec filter if specified
+                if codec_filter:
+                    filter_lower = codec_filter.lower()
+                    quality_lower = quality_name.lower()
+                    source_title = (event.get("sourceTitle") or "").lower()
+                    if filter_lower not in quality_lower and filter_lower not in source_title:
+                        continue
+
+                # Build upgrade entry
+                if source == "sonarr":
+                    series = event.get("series", {})
+                    episode = event.get("episode", {})
+                    season = episode.get("seasonNumber")
+                    ep_num = episode.get("episodeNumber")
+                    title = series.get("title", "Unknown")
+                    if isinstance(season, int) and isinstance(ep_num, int):
+                        title = f"{title} S{season:02d}E{ep_num:02d}"
+                else:
+                    movie = event.get("movie", {})
+                    title = f"{movie.get('title', 'Unknown')} ({movie.get('year', '?')})"
+
+                size_bytes = 0
+                try:
+                    size_bytes = int(data.get("size", 0))
+                except (ValueError, TypeError):
+                    pass
+
+                upgrades.append({
+                    "title": title,
+                    "old_quality": quality_name,
+                    "deleted_size_bytes": size_bytes,
+                    "deleted_size": _format_bytes(size_bytes) if size_bytes else "Unknown",
+                    "date": event_date.isoformat(),
+                    "source_title": event.get("sourceTitle", ""),
+                })
+
+            page += 1
+            # Safety: don't page indefinitely
+            if page > 50:
+                break
+
+        total_reclaimed = sum(u["deleted_size_bytes"] for u in upgrades)
+
+        result = {
+            "upgrades": upgrades,
+            "summary": {
+                "source": source,
+                "days_checked": days,
+                "codec_filter": codec_filter,
+                "total_upgrades": len(upgrades),
+                "total_space_reclaimed_bytes": total_reclaimed,
+                "total_space_reclaimed": _format_bytes(total_reclaimed),
+            },
+        }
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.exception("Upgrade detection failed")
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_ghost_history(
+    source: str = "get_iplayer",
+    media_type: str | None = None,
+    days: int = 365,
+    classify: bool = True,
+) -> str:
+    """Find previously downloaded files that no longer exist on disk.
+
+    Queries the event log for download events (e.g. from get_iplayer)
+    and checks whether each file still exists at its original download
+    path. Files that have moved are cross-referenced against Jellyfin
+    to distinguish:
+
+    - **relocated**: original path gone but content exists in Jellyfin
+      under a different path (e.g. moved from /downloads/ to /media/Movies/)
+    - **truly_deleted**: gone from disk AND not found in Jellyfin
+
+    Truly deleted entries are grouped by show name for compact output.
+
+    For get_iplayer events, includes BBC programme URLs for re-downloading.
+
+    Requires FILESYSTEM_SCAN_ENABLED=true. Set classify=false to skip
+    the Jellyfin cross-reference (faster, returns raw ghost list).
+
+    Args:
+        source: Event source to query (default "get_iplayer")
+        media_type: Filter by metadata type field — "tv" or "radio" (optional)
+        days: Look-back period in days (default 365)
+        classify: Cross-reference against Jellyfin to classify relocated vs truly deleted (default True)
+    """
+    import os
+    from app.filesystem import (
+        JellyfinNameIndex, PathMapper, classify_ghost, group_truly_deleted,
+    )
+
+    disabled = _check_filesystem_enabled()
+    if disabled:
+        return disabled
+
+    # Build metadata filters
+    metadata_filters = {}
+    if media_type:
+        metadata_filters["type"] = media_type
+
+    limit = _config.ghost_history_limit if _config else 500
+
+    try:
+        events = db.get_events_filtered(
+            source=source,
+            days=days,
+            event_type="downloaded",
+            metadata_filters=metadata_filters or None,
+            limit=limit,
+        )
+
+        if not events:
+            filter_desc = f" (type={media_type})" if media_type else ""
+            return json.dumps({
+                "message": f"No '{source}' download events found in the last {days} days{filter_desc}.",
+            })
+
+        ghosts = []
+        still_exist = 0
+
+        for event in events:
+            meta = event.get("metadata", {})
+            filename = meta.get("filename", "")
+            directory = meta.get("dir", "")
+
+            if not filename:
+                continue
+
+            # Construct full path from dir + filename
+            if directory:
+                full_path = os.path.join(directory, filename)
+            else:
+                full_path = filename
+
+            if os.path.exists(full_path):
+                still_exist += 1
+                continue
+
+            # Build BBC programme URL from pid
+            pid = meta.get("pid", "")
+            programme_type = meta.get("type", "tv")
+            if pid:
+                if programme_type == "radio":
+                    bbc_url = f"https://www.bbc.co.uk/sounds/play/{pid}"
+                else:
+                    bbc_url = f"https://www.bbc.co.uk/iplayer/episode/{pid}"
+            else:
+                bbc_url = None
+
+            ghosts.append({
+                "title": event.get("title", "Unknown"),
+                "name": meta.get("name"),
+                "episode": meta.get("episode"),
+                "series": meta.get("series"),
+                "seriesnum": meta.get("seriesnum"),
+                "episodenum": meta.get("episodenum"),
+                "channel": meta.get("channel"),
+                "categories": meta.get("categories"),
+                "type": programme_type,
+                "filename": filename,
+                "directory": directory,
+                "original_path": full_path,
+                "bbc_url": bbc_url,
+                "pid": pid,
+                "downloaded_at": event.get("timestamp"),
+            })
+
+        # -- Classify against Jellyfin if requested --
+        classify_error = None
+        if classify and ghosts:
+            client = _get_poller_client("jellyfin")
+            if client:
+                try:
+                    # Determine item types to query based on media_type filter
+                    if media_type == "radio":
+                        item_types = "Audio,MusicAlbum"
+                    else:
+                        item_types = "Movie,Series,Episode,MusicVideo,Video"
+
+                    # Collect unique show names from ghosts — search Jellyfin
+                    # per title instead of fetching the entire library
+                    raw_names = {
+                        g.get("name") or g.get("title", "")
+                        for g in ghosts
+                    }
+                    raw_names.discard("")
+
+                    # Build search variants: strip ": Series N" / ": Specials"
+                    # / ": 2025" suffixes since Jellyfin stores the bare name
+                    _series_suffix = re.compile(
+                        r":\s*(?:Series\s+\d+|Specials|\d{4})$", re.IGNORECASE,
+                    )
+                    search_names: set[str] = set()
+                    for name in raw_names:
+                        search_names.add(name)
+                        stripped = _series_suffix.sub("", name)
+                        if stripped != name:
+                            search_names.add(stripped)
+
+                    logger.info(
+                        "Ghost classify: searching Jellyfin for %d unique titles "
+                        "(%d raw, expanded with suffix variants)",
+                        len(search_names), len(raw_names),
+                    )
+
+                    # Search Jellyfin for each unique title
+                    all_jf_items: list[dict] = []
+                    seen_ids: set[str] = set()
+                    for title in search_names:
+                        try:
+                            results = _run_async(
+                                client.search_items_with_paths(
+                                    query=title,
+                                    include_item_types=item_types,
+                                    limit=50,
+                                ),
+                                timeout=60,
+                            )
+                            for item in results:
+                                iid = item.get("item_id")
+                                if iid not in seen_ids:
+                                    seen_ids.add(iid)
+                                    all_jf_items.append(item)
+                        except Exception as e:
+                            logger.warning(
+                                "Jellyfin search failed for '%s': %s", title, e,
+                            )
+
+                    logger.info(
+                        "Ghost classify: found %d Jellyfin items from %d searches",
+                        len(all_jf_items), len(search_names),
+                    )
+
+                    # Build name index and path mapper
+                    jf_index = JellyfinNameIndex(all_jf_items)
+                    path_mapper = None
+                    if _config and _config.media_path_mappings:
+                        path_mapper = PathMapper(_config.media_path_mappings)
+
+                    # Classify each ghost
+                    for ghost in ghosts:
+                        classify_ghost(ghost, jf_index, path_mapper)
+
+                except Exception as e:
+                    classify_error = str(e)
+                    logger.error("Jellyfin cross-reference failed: %s", classify_error)
+                    logger.exception("Full traceback:")
+                    # Fall through — ghosts won't have classification key
+            else:
+                classify_error = "Jellyfin not configured"
+                logger.warning("Jellyfin not configured — skipping classification")
+
+        # -- Build response --
+        classified_ok = classify and ghosts and ghosts[0].get("classification")
+        if classified_ok:
+            relocated = [g for g in ghosts if g.get("classification") == "relocated"]
+            truly_deleted = [g for g in ghosts if g.get("classification") == "truly_deleted"]
+
+            # Group truly_deleted by show name for compact output
+            truly_deleted_grouped = group_truly_deleted(truly_deleted)
+
+            result = {
+                "truly_deleted_grouped": truly_deleted_grouped,
+                "relocated": [{
+                    "title": g.get("title"),
+                    "name": g.get("name"),
+                    "episode": g.get("episode"),
+                    "channel": g.get("channel"),
+                    "original_path": g.get("original_path"),
+                    "current_path": g.get("current_path"),
+                    "jellyfin_item_id": g.get("jellyfin_item_id"),
+                    "jellyfin_type": g.get("jellyfin_type"),
+                } for g in relocated],
+                "summary": {
+                    "source": source,
+                    "media_type_filter": media_type,
+                    "days_checked": days,
+                    "total_events_checked": len(events),
+                    "still_on_disk": still_exist,
+                    "truly_deleted_count": len(truly_deleted),
+                    "relocated_count": len(relocated),
+                },
+            }
+        else:
+            # Unclassified fallback (classify=false or Jellyfin unavailable)
+            result = {
+                "ghost_files": ghosts,
+                "summary": {
+                    "source": source,
+                    "media_type_filter": media_type,
+                    "days_checked": days,
+                    "total_events_checked": len(events),
+                    "still_on_disk": still_exist,
+                    "missing_from_disk": len(ghosts),
+                },
+            }
+
+        # Always include build version so we can verify code is deployed
+        result["summary"]["build"] = MEDIASTACK_BUILD
+
+        # Surface classify errors so failures are visible in the response
+        if classify_error:
+            result["summary"]["classify_error"] = classify_error
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.exception("Ghost history check failed")
+        return json.dumps({"error": str(e)})
 
 
 @mcp_app.tool()

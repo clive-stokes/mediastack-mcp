@@ -68,9 +68,10 @@ class JellyfinClient:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f'MediaBrowser Token="{self.api_key}"'}
 
-    async def get(self, path: str, params: dict | None = None) -> Any:
+    async def get(self, path: str, params: dict | None = None,
+                  timeout: float | None = None) -> Any:
         url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=timeout or DEFAULT_TIMEOUT) as client:
             resp = await client.get(url, headers=self._headers(), params=params)
             resp.raise_for_status()
             return resp.json()

@@ -1,3 +1,65 @@
+# MediaStack MCP v1.1.0
+
+## Changes
+
+### Fix: Jellyfin library sizes for unmanaged libraries (#3)
+
+`mediastack_libraries` previously returned `size_bytes: 0` for any Jellyfin library
+not managed by an arr tool — Trash TV, Music Videos, Radio Shows, My Videos, and similar
+unmanaged content had no usable size data.
+
+**Root cause:** The poller explicitly set `size = 0` for all non-STRM Jellyfin libraries
+with the assumption that arr tools would cover them. They don't for content outside
+Sonarr/Radarr/Lidarr root folders.
+
+**Fix:** The Jellyfin library polling block now uses path-based detection to distinguish:
+
+- **STRM/iFiesta libraries** — `size_bytes = NULL` (negligible `.strm` text files, unchanged)
+- **Arr-managed libraries** — `size_bytes = NULL` (Sonarr/Radarr/Lidarr record accurate
+  sizes via their own poll; storing 0 from Jellyfin would be misleading)
+- **Unmanaged libraries** — `size_bytes` measured via `du -sb` on the library's filesystem
+  path, run in a thread pool to avoid blocking the event loop
+
+A library is considered arr-managed when any of its `Locations` paths (from Jellyfin's
+`/Library/VirtualFolders` API) overlap with a root folder configured in Sonarr, Radarr,
+or Lidarr.
+
+**Impact:** The `mediastack_libraries` tool now returns real sizes for unmanaged Jellyfin
+libraries, enabling accurate pie chart breakdowns of disk usage across all content types.
+
+---
+
+## Changes (continued)
+
+### Feat: daily cron schedule for library polling
+
+Adds an optional `MEDIASTACK_LIBRARY_CRON=HH:MM` env var that replaces the
+fixed-interval library poll with a daily scheduled run.
+
+**Behaviour:**
+- On container startup, the library poll fires immediately (unchanged — useful for testing)
+- After the first run, the poller sleeps until the next daily occurrence of `HH:MM`
+- If `MEDIASTACK_LIBRARY_CRON` is not set, the existing `MEDIASTACK_LIBRARY_INTERVAL`
+  behaviour is preserved (fully backwards compatible)
+
+**Why:** The `du -sb` calls added in this release traverse media directories to measure
+disk usage for unmanaged Jellyfin libraries. On a spinning HDD array, this wakes
+hibernating disks. Scheduling the poll at 02:30 (when Backrest is already running and
+drives are spinning) eliminates unnecessary wake-ups at arbitrary times.
+
+**Configuration:**
+```yaml
+# docker-compose.yaml
+environment:
+  TZ: Europe/London  # Required — cron fires in container local time
+  MEDIASTACK_LIBRARY_CRON: "02:30"
+```
+
+Invalid values (wrong format, out-of-range hours/minutes) log a warning and fall
+back to `MEDIASTACK_LIBRARY_INTERVAL`.
+
+---
+
 # MediaStack MCP v1.0.0
 
 A unified MCP server for home media stacks. Polls 13 services, records events and storage to PostgreSQL, and exposes 27 tools for AI agents to observe and manage your media library.

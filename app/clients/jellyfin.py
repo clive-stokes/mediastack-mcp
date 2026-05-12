@@ -94,6 +94,41 @@ class JellyfinClient(BaseJellyfinClient):
         })
         return self._slim_items(data.get("Items", []))
 
+    async def search_items_with_paths(
+        self,
+        query: str,
+        include_item_types: str = "Movie,Series,Episode,MusicVideo,Video",
+        limit: int = 50,
+    ) -> list[dict]:
+        """Search by name and return items with file paths.
+
+        Used by ghost classify — targeted searches per title instead of
+        fetching the entire library.
+        """
+        user_id = await self.get_user_id()
+        data = await self.get(f"/Users/{user_id}/Items", params={
+            "SearchTerm": query,
+            "Recursive": True,
+            "Limit": limit,
+            "Fields": "Path,MediaSources",
+            "IncludeItemTypes": include_item_types,
+        })
+        results = []
+        for item in data.get("Items", []):
+            paths = set()
+            if item.get("Path"):
+                paths.add(item["Path"])
+            for source in item.get("MediaSources", []):
+                if source.get("Path"):
+                    paths.add(source["Path"])
+            results.append({
+                "item_id": item["Id"],
+                "name": item.get("Name", "Unknown"),
+                "type": item.get("Type"),
+                "paths": list(paths),
+            })
+        return results
+
     async def get_genres(self, media_type: str | None = None) -> list[dict]:
         """List genres, optionally filtered by media type."""
         params: dict = {}
@@ -273,6 +308,80 @@ class JellyfinClient(BaseJellyfinClient):
         return await self.post(
             f"/Playlists/{playlist_id}/Items/{item_id}/Move/{new_index}",
         )
+
+    # -- Library items with file paths (for orphan detection) --
+
+    async def get_library_items_with_paths(
+        self,
+        parent_id: str | None = None,
+        include_item_types: str = "Movie,Series,Episode,Audio,MusicVideo,Video",
+        batch_size: int = 200,
+    ) -> list[dict]:
+        """Fetch all library items with their file paths.
+
+        Pages through the entire library to build a complete set.
+        Returns slim dicts with item_id, name, type, and file paths.
+        """
+        user_id = await self.get_user_id()
+        all_items: list[dict] = []
+        start_index = 0
+
+        while True:
+            params: dict = {
+                "Recursive": True,
+                "Fields": "Path,MediaSources",
+                "IncludeItemTypes": include_item_types,
+                "StartIndex": start_index,
+                "Limit": batch_size,
+                "SortBy": "SortName",
+                "SortOrder": "Ascending",
+            }
+            if parent_id:
+                params["ParentId"] = parent_id
+
+            # Longer timeout per page — Jellyfin can be slow on large libraries
+            data = await self.get(f"/Users/{user_id}/Items", params=params,
+                                  timeout=120.0)
+            items = data.get("Items", [])
+            total = data.get("TotalRecordCount", 0)
+
+            for item in items:
+                paths = set()
+                # Direct path on the item
+                if item.get("Path"):
+                    paths.add(item["Path"])
+                # Paths from MediaSources (video/audio files)
+                for source in item.get("MediaSources", []):
+                    if source.get("Path"):
+                        paths.add(source["Path"])
+
+                if paths:
+                    all_items.append({
+                        "item_id": item["Id"],
+                        "name": item.get("Name", "Unknown"),
+                        "type": item.get("Type"),
+                        "paths": list(paths),
+                    })
+
+            start_index += len(items)
+            if start_index >= total or not items:
+                break
+
+        return all_items
+
+    async def get_libraries_with_ids(self) -> list[dict]:
+        """Get all libraries with their IDs and paths, for orphan detection."""
+        libraries = await self.get("/Library/VirtualFolders")
+        result = []
+        for lib in libraries:
+            locations = lib.get("Locations", [])
+            result.append({
+                "name": lib.get("Name", "Unknown"),
+                "item_id": lib.get("ItemId", ""),
+                "collection_type": lib.get("CollectionType", ""),
+                "locations": locations,
+            })
+        return result
 
     # -- Helpers --
 

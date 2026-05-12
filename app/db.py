@@ -121,12 +121,38 @@ def insert_event(event: dict) -> bool:
 
 
 def insert_events(events: list[dict]) -> int:
-    """Bulk insert events. Returns count of new (non-duplicate) events."""
+    """Bulk insert events. Returns count of new (non-duplicate) events.
+
+    Uses a single connection for the batch — more efficient for backfills
+    of ~100 items than opening a connection per event.
+    """
+    conn = _conn()
     count = 0
-    for event in events:
-        if insert_event(event):
-            count += 1
-    return count
+    try:
+        with conn.cursor() as cur:
+            for event in events:
+                cur.execute(
+                    """
+                    INSERT INTO media_events (timestamp, source, event_type, title, metadata, source_event_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_event_id) WHERE source_event_id IS NOT NULL DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        event.get("timestamp") or datetime.now(timezone.utc),
+                        event["source"],
+                        event["event_type"],
+                        event.get("title"),
+                        json.dumps(event.get("metadata", {})),
+                        event.get("source_event_id"),
+                    ),
+                )
+                if cur.fetchone() is not None:
+                    count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
 
 
 def get_timeline(hours: int = 24, source: str | None = None,
@@ -183,6 +209,57 @@ def search_events(query: str, days: int = 30, source: str | None = None) -> list
                 f"SELECT id, timestamp, source, event_type, title, metadata "
                 f"FROM media_events WHERE {where} "
                 f"ORDER BY timestamp DESC LIMIT 50",
+                params,
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                row["timestamp"] = row["timestamp"].isoformat()
+            return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_events_filtered(
+    source: str,
+    days: int = 365,
+    event_type: str | None = None,
+    metadata_filters: dict | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    """Fetch events with source, type, and JSONB metadata filters.
+
+    Args:
+        source: Required source name (e.g. "get_iplayer").
+        days: Look-back period in days.
+        event_type: Optional event type filter.
+        metadata_filters: Dict of metadata key->value pairs to match
+                          (e.g. {"type": "tv"}).
+        limit: Maximum rows to return.
+    """
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            conditions = [
+                "source = %s",
+                "timestamp >= NOW() - INTERVAL '%s days'",
+            ]
+            params: list = [source, days]
+
+            if event_type:
+                conditions.append("event_type = %s")
+                params.append(event_type)
+
+            if metadata_filters:
+                for key, value in metadata_filters.items():
+                    conditions.append("metadata->>%s = %s")
+                    params.extend([key, value])
+
+            params.append(limit)
+            where = " AND ".join(conditions)
+            cur.execute(
+                f"SELECT id, timestamp, source, event_type, title, metadata "
+                f"FROM media_events WHERE {where} "
+                f"ORDER BY timestamp DESC LIMIT %s",
                 params,
             )
             rows = cur.fetchall()

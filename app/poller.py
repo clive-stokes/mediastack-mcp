@@ -328,6 +328,41 @@ class Poller:
                 pass
         return None
 
+    async def _get_dir_size(self, path: str) -> int | None:
+        """Get the actual bytes consumed by a directory using du.
+
+        Uses `du -sb` (summarise, apparent bytes) via subprocess in a thread pool
+        so the event loop is not blocked. Suitable for large media directories.
+
+        Returns None if the path doesn't exist or du fails.
+        """
+        import os
+        import subprocess
+
+        if not os.path.exists(path):
+            logger.debug("_get_dir_size: path does not exist: %s", path)
+            return None
+
+        def _run_du() -> int | None:
+            try:
+                result = subprocess.run(
+                    ["du", "-sb", path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,  # Large directories (e.g. Trash TV) may take time
+                )
+                if result.returncode == 0:
+                    # Output format: "<bytes>\t<path>"
+                    return int(result.stdout.split()[0])
+                logger.warning("du failed for %s: %s", path, result.stderr.strip())
+            except subprocess.TimeoutExpired:
+                logger.warning("du timed out for %s", path)
+            except (ValueError, IndexError, OSError) as e:
+                logger.warning("_get_dir_size error for %s: %s", path, e)
+            return None
+
+        return await asyncio.to_thread(_run_du)
+
     # -- Library snapshot polling --
 
     async def _poll_libraries_loop(self) -> None:
@@ -336,7 +371,29 @@ class Poller:
                 await self._poll_libraries()
             except Exception:
                 logger.exception("Error in library polling cycle")
-            await asyncio.sleep(self.config.library_interval)
+
+            if self.config.library_cron:
+                secs = self._seconds_until_cron(self.config.library_cron)
+                logger.info(
+                    "[libraries] Next poll at %s (%.0fs)", self.config.library_cron, secs
+                )
+                await asyncio.sleep(secs)
+            else:
+                await asyncio.sleep(self.config.library_interval)
+
+    def _seconds_until_cron(self, hh_mm: str) -> float:
+        """Return seconds until the next daily occurrence of HH:MM (container local time).
+
+        If the target time has already passed today, schedules for tomorrow.
+        Relies on the container TZ env var being set correctly (e.g. TZ=Europe/London).
+        """
+        from datetime import datetime, timedelta
+        h, m = map(int, hh_mm.split(":"))
+        now = datetime.now()
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return (target - now).total_seconds()
 
     async def _poll_libraries(self) -> None:
         """Collect library size/count snapshots."""
@@ -372,20 +429,68 @@ class Poller:
             except Exception:
                 logger.exception("[lidarr] Failed to poll library stats")
 
-        # Jellyfin: per-library item counts
+        # Jellyfin: per-library item counts + disk usage for unmanaged libraries.
+        #
+        # Strategy:
+        #   - STRM/iFiesta libraries  → size_bytes = NULL (negligible .strm files)
+        #   - arr-managed libraries   → size_bytes = NULL (Sonarr/Radarr/Lidarr record
+        #                               accurate sizes via their own API calls above)
+        #   - Everything else         → size_bytes measured with `du -sb` on the library path
+        #
+        # "arr-managed" is determined by path overlap: if any of the library's Locations
+        # match a root folder configured in Sonarr, Radarr, or Lidarr, the arr tool owns it.
         if "jellyfin" in self._clients:
             try:
+                # Collect arr root folder paths so we can skip arr-managed Jellyfin libraries.
+                arr_root_paths: set[str] = set()
+                for arr_name in ("sonarr", "radarr", "lidarr"):
+                    arr_client = self._clients.get(arr_name)
+                    if arr_client and hasattr(arr_client, "get_root_folders"):
+                        try:
+                            folders = await arr_client.get_root_folders()
+                            for f in folders:
+                                p = f.get("path", "").rstrip("/")
+                                if p:
+                                    arr_root_paths.add(p)
+                        except Exception:
+                            logger.warning("[%s] Could not fetch root folders for arr-path check", arr_name)
+
                 libraries = await self._clients["jellyfin"].get_libraries()
                 for lib in libraries:
                     lib_name = lib.get("Name", "Unknown")
                     lib_id = lib.get("ItemId", "")
-                    if lib_id:
-                        item_count = await self._clients["jellyfin"].get_library_items_count(lib_id)
-                        # STRM libraries have negligible disk usage
-                        is_strm = "strm" in lib_name.lower() or "ifiesta" in lib_name.lower()
-                        size = None if is_strm else 0  # size tracked via *arr, not Jellyfin
-                        db.insert_library_snapshot("jellyfin", lib_name, item_count, size)
+                    if not lib_id:
+                        continue
+
+                    item_count = await self._clients["jellyfin"].get_library_items_count(lib_id)
+
+                    # STRM/IPTV libraries: negligible disk usage (.strm files are tiny text files)
+                    is_strm = "strm" in lib_name.lower() or "ifiesta" in lib_name.lower()
+                    if is_strm:
+                        db.insert_library_snapshot("jellyfin", lib_name, item_count, None)
                         count += 1
+                        continue
+
+                    # Check if this library's path is owned by an arr tool.
+                    # Locations is a list of filesystem paths from /Library/VirtualFolders.
+                    locations = lib.get("Locations", [])
+                    lib_paths = {loc.rstrip("/") for loc in locations}
+                    if lib_paths & arr_root_paths:
+                        # Arr already records an accurate size for this library — store NULL
+                        # to avoid a misleading duplicate entry with a different value.
+                        db.insert_library_snapshot("jellyfin", lib_name, item_count, None)
+                        count += 1
+                        continue
+
+                    # Unmanaged library: measure actual bytes used on disk.
+                    size: int | None = None
+                    for loc in locations:
+                        measured = await self._get_dir_size(loc)
+                        if measured is not None:
+                            size = (size or 0) + measured
+
+                    db.insert_library_snapshot("jellyfin", lib_name, item_count, size)
+                    count += 1
             except Exception:
                 logger.exception("[jellyfin] Failed to poll library stats")
 

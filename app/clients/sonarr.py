@@ -103,6 +103,12 @@ class SonarrClient(ArrClient):
         ep_num = episode.get("episodeNumber")
         series_title = series.get("title", "")
 
+        # Sonarr uses 0 / "" as "unknown" sentinels for tmdbId and imdbId.
+        # Coerce to None so consumers don't try /3/tv/0 lookups.
+        tvdb_id = series.get("tvdbId") or None
+        tmdb_id = series.get("tmdbId") or None
+        imdb_id = series.get("imdbId") or None
+
         if series_title and isinstance(season, int) and isinstance(ep_num, int):
             title = f"{series_title} S{season:02d}E{ep_num:02d}"
         elif series_title:
@@ -123,6 +129,9 @@ class SonarrClient(ArrClient):
                 "indexer": event.get("data", {}).get("indexer"),
                 "download_client": event.get("data", {}).get("downloadClient"),
                 "series_id": series.get("id"),
+                "tvdb_id": tvdb_id,
+                "tmdb_id": tmdb_id,
+                "imdb_id": imdb_id,
                 "episode_id": episode.get("id"),
                 "season": season,
                 "episode": ep_num,

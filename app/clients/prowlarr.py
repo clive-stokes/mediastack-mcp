@@ -31,12 +31,12 @@ class ProwlarrClient(ArrClient):
             params["categories"] = categories
         return await self.get("/api/v1/search", params=params)
 
-    async def grab(self, guid: str, indexer_id: int) -> dict:
-        """POST /api/v1/search — send a release to Prowlarr's download client."""
-        return await self.post("/api/v1/search", json_data={
-            "guid": guid,
-            "indexerId": indexer_id,
-        })
+    async def grab(self, download_url: str) -> dict:
+        """Return the download URL for external submission to a download client.
+
+        The URL is passed directly to the download client without additional processing.
+        """
+        return {"download_url": download_url}
 
     async def ping(self) -> bool:
         try:

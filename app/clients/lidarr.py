@@ -109,6 +109,7 @@ class LidarrClient(ArrClient):
                 "indexer": event.get("data", {}).get("indexer"),
                 "download_client": event.get("data", {}).get("downloadClient"),
                 "artist_id": artist.get("id"),
+                "foreign_artist_id": artist.get("foreignArtistId"),
                 "album_id": album.get("id"),
             },
         }
