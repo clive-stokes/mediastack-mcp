@@ -34,6 +34,7 @@ class Poller:
         self.config = config
         self._clients: dict = {}
         self._qbt_prev_torrents: list[dict] = []
+        self._seerr_prev_media_status: dict[int, int] = {}
         self._running = False
 
         self._init_clients()
@@ -200,6 +201,35 @@ class Poller:
                 logger.info("[seerr] Recorded %d new events", inserted)
         except Exception:
             logger.exception("[seerr] Failed to poll requests")
+
+        # Media availability diff — separate from request pipeline.
+        await self._poll_seerr_media()
+
+    async def _poll_seerr_media(self) -> None:
+        """Snapshot Seerr's full media list and diff for availability drops.
+
+        Emits `seerr_media_unavailable` events when media drops below status 4
+        (a Radarr/Sonarr deletion that Seerr has noticed). The previous snapshot
+        is in-memory only — first cycle after restart reseeds without emitting.
+        """
+        client: SeerrClient = self._clients["seerr"]
+        try:
+            current = await client.get_all_media()
+            if self._seerr_prev_media_status:
+                events, new_snapshot = client.parse_media_diff_events(
+                    current, self._seerr_prev_media_status,
+                )
+                inserted = db.insert_events(events)
+                if inserted:
+                    logger.info("[seerr] Recorded %d media availability drops", inserted)
+                self._seerr_prev_media_status = new_snapshot
+            else:
+                # First cycle — seed the snapshot, emit nothing.
+                _, new_snapshot = client.parse_media_diff_events(current, {})
+                self._seerr_prev_media_status = new_snapshot
+                logger.info("[seerr] Seeded media snapshot with %d titles", len(new_snapshot))
+        except Exception:
+            logger.exception("[seerr] Failed to poll media list")
 
     async def _poll_boxarr(self) -> None:
         client: BoxarrClient = self._clients["boxarr"]
