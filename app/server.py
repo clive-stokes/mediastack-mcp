@@ -275,7 +275,7 @@ def mediastack_confirm(confirmation_id: str) -> str:
         result = _run_async(action.execute_fn())
         # Use specific event_type for deletions vs other writes
         event_type = "write_confirmed"
-        if action.preview.get("action") in ("delete", "cancel_request"):
+        if action.preview.get("action") in ("delete", "cancel_request", "delete_seerr_media"):
             event_type = "delete_confirmed"
         # Record write event in media_events for audit trail
         db.insert_event({
@@ -902,6 +902,62 @@ def mediastack_cancel_request(request_id: int) -> str:
 
         async def execute():
             return await client.delete_request(request_id)
+
+        action = confirmation_store.create(description, preview, execute)
+        return json.dumps({
+            "preview": preview,
+            "confirmation_id": action.confirmation_id,
+            "message": f"{description}. Call mediastack_confirm('{action.confirmation_id}') to execute.",
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp_app.tool()
+def mediastack_delete_seerr_media(media_id: int) -> str:
+    """Delete a Seerr media tracking record. Returns a preview; requires confirmation.
+
+    Removes Seerr's internal media entry so the title becomes re-requestable
+    in the Seerr UI. This does NOT delete any files or touch Sonarr/Radarr —
+    it only clears Seerr's memory that the title was ever requested or
+    available. Useful after `mediastack_seerr_deletion_audit` identifies
+    titles whose *arr files were deleted and you want Seerr to forget them.
+
+    Args:
+        media_id: Seerr's internal media id (not request_id, not tmdb_id).
+                  Obtain via mediastack_seerr_deletion_audit.
+    """
+    client = _get_poller_client("seerr")
+    if not client:
+        return json.dumps({"error": "Seerr is not configured"})
+
+    try:
+        media = _run_async(client.get_media_by_id(media_id))
+        media_type = media.get("mediaType", "unknown")
+        title = media.get("title") or media.get("name") or f"media #{media_id}"
+        status = media.get("status", 0)
+        status_map = {1: "unknown", 2: "pending", 3: "processing", 4: "partially_available", 5: "available"}
+        status_label = status_map.get(status, f"status_{status}")
+
+        preview = {
+            "action": "delete_seerr_media",
+            "service": "seerr",
+            "title": title,
+            "media_type": media_type,
+            "media_id": media_id,
+            "tmdb_id": media.get("tmdbId"),
+            "tvdb_id": media.get("tvdbId"),
+            "current_status": status_label,
+            "warning": (
+                f"This removes Seerr's tracking record for '{title}'. "
+                "No files are deleted and Sonarr/Radarr are not affected. "
+                "The title will become re-requestable in Seerr's UI."
+            ),
+        }
+        description = f"Delete Seerr media record for '{title}' (media #{media_id}, {status_label})"
+
+        async def execute():
+            return await client.delete_media(media_id)
 
         action = confirmation_store.create(description, preview, execute)
         return json.dumps({
