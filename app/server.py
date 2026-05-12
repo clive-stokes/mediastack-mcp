@@ -1396,6 +1396,102 @@ def mediastack_jellyfin_playlist_modify(
     }, indent=2)
 
 
+@mcp_app.tool()
+def mediastack_seerr_deletion_audit(days: int = 30, media_type: str | None = None) -> str:
+    """Audit Seerr media records that have dropped from 'available' status.
+
+    Surfaces titles whose *arr file was deleted (e.g. by a Trakt-list
+    "Remove and Delete" rule) and which Seerr noticed via webhook. Each
+    result includes the TMDB/TVDB IDs needed to re-add via
+    mediastack_add_content or mediastack_request_content.
+
+    The 'recovered' flag is True if a later poll observed the media
+    returning to status >= 4 (e.g. you re-downloaded it).
+
+    Args:
+        days: How many days back to scan (default 30, max 365)
+        media_type: Filter to 'movie' or 'tv' (default: both)
+    """
+    if days < 1 or days > 365:
+        return json.dumps({"error": "days must be between 1 and 365"})
+    if media_type and media_type not in ("movie", "tv"):
+        return json.dumps({"error": "media_type must be 'movie', 'tv', or omitted"})
+
+    try:
+        # Pull all unavailable events in the window.
+        conn = db._conn()
+        try:
+            import psycopg2.extras
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                if media_type:
+                    cur.execute(
+                        """
+                        SELECT id, timestamp, title, metadata
+                        FROM media_events
+                        WHERE event_type = 'seerr_media_unavailable'
+                          AND timestamp >= NOW() - (%s || ' days')::INTERVAL
+                          AND metadata->>'media_type' = %s
+                        ORDER BY timestamp DESC
+                        """,
+                        (days, media_type),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, timestamp, title, metadata
+                        FROM media_events
+                        WHERE event_type = 'seerr_media_unavailable'
+                          AND timestamp >= NOW() - (%s || ' days')::INTERVAL
+                        ORDER BY timestamp DESC
+                        """,
+                        (days,),
+                    )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        # Resolve current status via one live Seerr API call (so 'recovered'
+        # reflects right-now state, not the value frozen at drop time).
+        out: list[dict] = []
+        media_ids = [r["metadata"].get("media_id") for r in rows if r["metadata"].get("media_id")]
+        client = _get_poller_client("seerr")
+        live_status: dict[int, int] = {}
+        if client and media_ids:
+            try:
+                current = _run_async(client.get_all_media())
+                for m in current:
+                    if m.get("id") in media_ids:
+                        live_status[m["id"]] = m.get("status", 0)
+            except Exception as e:
+                logger.warning("seerr_deletion_audit: live status lookup failed: %s", e)
+
+        for r in rows:
+            meta = r["metadata"] or {}
+            mid = meta.get("media_id")
+            current_status = live_status.get(mid, meta.get("current_status"))
+            recovered = bool(current_status and current_status >= 4)
+            out.append({
+                "media_id": mid,
+                "title": r["title"],
+                "media_type": meta.get("media_type"),
+                "tmdb_id": meta.get("tmdb_id"),
+                "tvdb_id": meta.get("tvdb_id"),
+                "imdb_id": meta.get("imdb_id"),
+                "dropped_at": r["timestamp"].isoformat(),
+                "previous_status": meta.get("previous_status"),
+                "current_status": current_status,
+                "recovered": recovered,
+            })
+
+        return json.dumps({
+            "count": len(out),
+            "window_days": days,
+            "results": out,
+        }, indent=2, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 # -- Startup --
 
 def _run_poller_thread(config: Config) -> None:
