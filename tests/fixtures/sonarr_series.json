@@ -1,0 +1,10 @@
+{
+  "id": 5,
+  "title": "Test Show",
+  "path": "/media/Series/Test Show",
+  "tvdbId": 123456,
+  "qualityProfileId": 1,
+  "statistics": {
+    "sizeOnDisk": 5368709120
+  }
+}

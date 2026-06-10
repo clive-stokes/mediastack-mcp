@@ -1,0 +1,58 @@
+[
+  {
+    "id": 1001,
+    "eventType": "grabbed",
+    "date": "2026-06-01T12:00:00Z",
+    "sourceTitle": "Test.Show.S01E01.1080p.WEB-DL",
+    "series": {
+      "id": 5,
+      "title": "Test Show",
+      "tvdbId": 123456,
+      "tmdbId": 0,
+      "imdbId": ""
+    },
+    "episode": {
+      "id": 21,
+      "seasonNumber": 1,
+      "episodeNumber": 1
+    },
+    "quality": {
+      "quality": {
+        "name": "WEBDL-1080p"
+      }
+    },
+    "data": {
+      "size": 1234567890,
+      "indexer": "test-indexer",
+      "downloadClient": "SABnzbd"
+    }
+  },
+  {
+    "id": 1002,
+    "eventType": "downloadFolderImported",
+    "date": "2026-06-01T12:05:00Z",
+    "sourceTitle": "Test.Show.S01E02.1080p.WEB-DL",
+    "series": {
+      "id": 5,
+      "title": "Test Show",
+      "tvdbId": 123456,
+      "tmdbId": 99887,
+      "imdbId": "tt7654321"
+    },
+    "episode": {
+      "id": 22,
+      "seasonNumber": 1,
+      "episodeNumber": 2
+    },
+    "quality": {
+      "quality": {
+        "name": "WEBDL-1080p"
+      }
+    },
+    "data": {
+      "size": 2345678901,
+      "indexer": "test-indexer",
+      "downloadClient": "SABnzbd"
+    }
+  }
+]

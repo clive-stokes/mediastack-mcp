@@ -1,0 +1,24 @@
+[
+  {
+    "id": 2001,
+    "eventType": "grabbed",
+    "date": "2026-06-02T09:00:00Z",
+    "sourceTitle": "Test.Movie.2024.1080p.BluRay",
+    "movie": {
+      "id": 7,
+      "title": "Test Movie",
+      "year": 2024,
+      "tmdbId": 654321
+    },
+    "quality": {
+      "quality": {
+        "name": "Bluray-1080p"
+      }
+    },
+    "data": {
+      "size": 2147483648,
+      "indexer": "test-indexer",
+      "downloadClient": "SABnzbd"
+    }
+  }
+]
