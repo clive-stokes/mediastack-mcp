@@ -14,7 +14,19 @@ from app.config import Config
 from app.poller import Poller
 from app.confirmations import store as confirmation_store, EXPIRY_SECONDS
 
-# Patch: relax Accept header validation so Claude Code can connect.
+# Monkey-patch: relax the SDK's Accept header validation.
+#
+# Why: the streamable-http transport 406s any POST whose Accept header does
+# not include BOTH application/json and text/event-stream. mcp-remote (the
+# bridge Claude Code/Desktop use) does not always send both, so without this
+# patch those clients cannot connect.
+#
+# Verified against: mcp 1.27.0 (the version pinned in requirements.txt at the
+# time of writing). _validate_accept_header is a private SDK internal — the
+# pin in requirements.txt (<2.0) plus tests/test_sdk_patch.py guard against
+# an upgrade renaming it silently. Upstream discussion of relaxing the
+# validation: https://github.com/modelcontextprotocol/python-sdk/issues/609
+# — remove this patch if the SDK stops requiring both Accept values.
 import mcp.server.streamable_http as _shttp
 
 _orig_validate = _shttp.StreamableHTTPServerTransport._validate_accept_header
