@@ -87,7 +87,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -96,7 +96,7 @@ services:
       start_period: 30s
     labels:
       <<: *labels-allow
-      homepage.group: "Media Services"
+      homepage.group: "Memory"
       homepage.name: "MediaStack"
       homepage.icon: "sh-radarr-light.webp"
       homepage.description: "Media Stack Observer (MCP)"
