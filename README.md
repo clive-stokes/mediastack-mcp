@@ -268,6 +268,29 @@ app/
 - httpx (async HTTP client)
 - Uvicorn + Starlette
 
+## Testing
+
+Four tiers — tiers 1–3 run anywhere (laptop, CI) with no media services
+and no credentials:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest          # tiers 1–3
+pytest -m live  # tier 4 (manual, opt-in)
+```
+
+1. **Pure logic** — confirmation protocol (expiry, renewal,
+   execute-exactly-once), scan path validation, env auto-discovery,
+   auth middleware
+2. **Mocked HTTP** (respx, recorded fixtures) — delete previews,
+   client auth headers, *arr history parsing and dedup IDs
+3. **Real PostgreSQL** — schema idempotency, event dedup, retention
+   rollup, storage growth. Uses `TEST_DATABASE_URL` if set (CI), else
+   a throwaway [testcontainers](https://testcontainers-python.readthedocs.io/)
+   instance
+4. **Live smoke** (`pytest -m live`) — read-only checks against a
+   running deployment; never exercises write or confirm tools
+
 ## How this was built
 
 This project was designed and implemented entirely using [Claude](https://claude.ai) (Anthropic's AI assistant), working from a detailed requirements specification. The spec covered architecture, service integration, database schema, polling strategy, MCP tool design, and a phased delivery plan. Claude wrote all the code, documentation, and Docker configuration across five implementation phases.

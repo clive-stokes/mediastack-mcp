@@ -1,0 +1,10 @@
+{
+  "id": 9,
+  "artistName": "Test Artist",
+  "path": "/media/Music/Test Artist",
+  "foreignArtistId": "00000000-1111-2222-3333-444444444444",
+  "qualityProfileId": 1,
+  "statistics": {
+    "sizeOnDisk": 1073741824
+  }
+}
