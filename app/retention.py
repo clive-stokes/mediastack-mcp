@@ -37,30 +37,39 @@ def _rollup_events() -> dict:
             if old_count == 0:
                 return {"purged": 0, "message": "No events older than 90 days"}
 
-            # Insert daily summaries for old events (if not already done)
+            # Insert daily summaries for old events (if not already done).
+            # Aggregate per (day, source, event_type) first, then fold the
+            # per-type counts into one summary row per (day, source) — a
+            # single-level GROUP BY including cnt would split event types
+            # with different counts into rows that collide on the rollup
+            # dedup key, silently dropping all but the first.
             cur.execute("""
-                INSERT INTO media_events (timestamp, source, event_type, title, metadata, source_event_id)
-                SELECT
-                    date_trunc('day', timestamp) AS day,
-                    source,
-                    'daily_summary',
-                    format('Daily summary: %s %s events', count(*), source),
-                    jsonb_build_object(
-                        'event_counts', jsonb_object_agg(event_type, cnt),
-                        'total_size_bytes', sum_size,
-                        'rollup', true
-                    ),
-                    format('rollup_%s_%s', source, date_trunc('day', timestamp)::date)
-                FROM (
+                WITH per_type AS (
                     SELECT
-                        timestamp, source, event_type,
-                        count(*) OVER (PARTITION BY source, event_type, date_trunc('day', timestamp)) as cnt,
-                        sum((metadata->>'size_bytes')::bigint) OVER (PARTITION BY source, date_trunc('day', timestamp)) as sum_size
+                        date_trunc('day', timestamp) AS day,
+                        source,
+                        event_type,
+                        count(*) AS cnt,
+                        sum((metadata->>'size_bytes')::bigint) AS type_size
                     FROM media_events
                     WHERE timestamp < NOW() - INTERVAL '90 days'
                       AND event_type != 'daily_summary'
-                ) sub
-                GROUP BY date_trunc('day', timestamp), source, cnt, sum_size
+                    GROUP BY 1, 2, 3
+                )
+                INSERT INTO media_events (timestamp, source, event_type, title, metadata, source_event_id)
+                SELECT
+                    day,
+                    source,
+                    'daily_summary',
+                    format('Daily summary: %s %s events', sum(cnt), source),
+                    jsonb_build_object(
+                        'event_counts', jsonb_object_agg(event_type, cnt),
+                        'total_size_bytes', sum(type_size),
+                        'rollup', true
+                    ),
+                    format('rollup_%s_%s', source, day::date)
+                FROM per_type
+                GROUP BY day, source
                 ON CONFLICT (source_event_id) WHERE source_event_id IS NOT NULL DO NOTHING
             """)
 
