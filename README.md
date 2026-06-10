@@ -181,7 +181,7 @@ app/
 
 - **Transport:** Streamable HTTP (FastMCP)
 - **Database:** PostgreSQL with JSONB metadata
-- **Polling:** Background daemon thread with configurable intervals
+- **Polling:** Asyncio polling loops running in a dedicated daemon thread (own event loop), with configurable intervals
 - **Deduplication:** Events keyed by `source_event_id` (unique constraint)
 - **Health:** Sparse table — only records state changes
 - **Retention:** Events rolled up to daily summaries after 90 days; storage snapshots rolled up to daily averages after 14 days
@@ -237,7 +237,7 @@ app/
 
 ## Tech Stack
 
-- Python 3.11
+- Python 3.14
 - [FastMCP](https://github.com/jlowin/fastmcp) (MCP SDK)
 - PostgreSQL (psycopg2)
 - httpx (async HTTP client)
@@ -245,7 +245,7 @@ app/
 
 ## How this was built
 
-This project was designed and implemented entirely using [Claude](https://claude.ai) (Anthropic's AI assistant), working from a detailed requirements specification. The spec covered architecture, service integration, database schema, polling strategy, MCP tool design, and a phased delivery plan. Claude wrote all the code, tests, documentation, and Docker configuration across five implementation phases.
+This project was designed and implemented entirely using [Claude](https://claude.ai) (Anthropic's AI assistant), working from a detailed requirements specification. The spec covered architecture, service integration, database schema, polling strategy, MCP tool design, and a phased delivery plan. Claude wrote all the code, documentation, and Docker configuration across five implementation phases.
 
 The human contribution was the product vision, requirements, and iterative feedback — Claude handled the engineering.
 
