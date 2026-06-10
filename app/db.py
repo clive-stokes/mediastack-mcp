@@ -1,4 +1,10 @@
-"""PostgreSQL database layer for MediaStack."""
+"""PostgreSQL database layer for MediaStack.
+
+All functions here are synchronous (psycopg2). Callers running inside an
+asyncio event loop must wrap them in asyncio.to_thread(...) — see poller.py.
+Connections come from a small ThreadedConnectionPool rather than a fresh
+connect() per call.
+"""
 
 import json
 import logging
@@ -6,21 +12,70 @@ from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 logger = logging.getLogger(__name__)
 
 _db_url: str = ""
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+
+POOL_MIN = 1
+POOL_MAX = 5
 
 
 def init(db_url: str) -> None:
-    """Store the DB URL and create schema."""
-    global _db_url
+    """Store the DB URL, build the connection pool, and create schema."""
+    global _db_url, _pool
     _db_url = db_url
+    if _pool is not None:
+        try:
+            _pool.closeall()
+        except Exception:
+            pass
+    _pool = psycopg2.pool.ThreadedConnectionPool(POOL_MIN, POOL_MAX, db_url)
     _create_schema()
 
 
-def _conn():
-    return psycopg2.connect(_db_url)
+class _PooledConnection:
+    """Borrowed pool connection — close() returns it to the pool.
+
+    Keeps the existing `conn = _conn(); try: ... finally: conn.close()`
+    call pattern working unchanged across db.py, retention.py, and server.py.
+    """
+
+    def __init__(self, pool: psycopg2.pool.ThreadedConnectionPool, conn):
+        self._pool = pool
+        self._raw = conn
+
+    def cursor(self, *args, **kwargs):
+        return self._raw.cursor(*args, **kwargs)
+
+    def commit(self) -> None:
+        self._raw.commit()
+
+    def rollback(self) -> None:
+        self._raw.rollback()
+
+    def close(self) -> None:
+        try:
+            # Discard any uncommitted/failed transaction so the next borrower
+            # gets a clean connection. No-op after a commit.
+            if not self._raw.closed:
+                self._raw.rollback()
+        except Exception:
+            pass
+        self._pool.putconn(self._raw, close=self._raw.closed)
+
+
+def _conn() -> _PooledConnection:
+    if _pool is None:
+        raise RuntimeError("db.init() has not been called")
+    conn = _pool.getconn()
+    if conn.closed:
+        # Server-side drop (e.g. Postgres restart) — replace the dead one
+        _pool.putconn(conn, close=True)
+        conn = _pool.getconn()
+    return _PooledConnection(_pool, conn)
 
 
 def _create_schema() -> None:

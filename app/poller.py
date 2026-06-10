@@ -145,7 +145,7 @@ class Poller:
         try:
             raw_events = await client.get_history()
             events = [client.parse_history_event(e) for e in raw_events]
-            inserted = db.insert_events(events)
+            inserted = await asyncio.to_thread(db.insert_events, events)
             if inserted:
                 logger.info("[%s] Recorded %d new events", name, inserted)
         except Exception:
@@ -156,7 +156,7 @@ class Poller:
         try:
             slots = await client.get_history()
             events = [client.parse_history_event(s) for s in slots]
-            inserted = db.insert_events(events)
+            inserted = await asyncio.to_thread(db.insert_events, events)
             if inserted:
                 logger.info("[sabnzbd] Recorded %d new events", inserted)
         except Exception:
@@ -172,7 +172,7 @@ class Poller:
                 for e in events:
                     if not e["timestamp"]:
                         e["timestamp"] = now
-                inserted = db.insert_events(events)
+                inserted = await asyncio.to_thread(db.insert_events, events)
                 if inserted:
                     logger.info("[qbittorrent] Recorded %d new events", inserted)
             self._qbt_prev_torrents = current
@@ -192,7 +192,7 @@ class Poller:
             mov_events = mov_data.get("data", []) if isinstance(mov_data, dict) else []
             events.extend(client.parse_history_event(e, "movie") for e in mov_events)
 
-            inserted = db.insert_events(events)
+            inserted = await asyncio.to_thread(db.insert_events, events)
             if inserted:
                 logger.info("[bazarr] Recorded %d new events", inserted)
         except Exception:
@@ -204,7 +204,7 @@ class Poller:
             data = await client.get_requests()
             requests = data.get("results", []) if isinstance(data, dict) else []
             events = [client.parse_request_event(r) for r in requests]
-            inserted = db.insert_events(events)
+            inserted = await asyncio.to_thread(db.insert_events, events)
             if inserted:
                 logger.info("[seerr] Recorded %d new events", inserted)
         except Exception:
@@ -227,7 +227,7 @@ class Poller:
                 events, new_snapshot = client.parse_media_diff_events(
                     current, self._seerr_prev_media_status,
                 )
-                inserted = db.insert_events(events)
+                inserted = await asyncio.to_thread(db.insert_events, events)
                 if inserted:
                     logger.info("[seerr] Recorded %d media availability drops", inserted)
                 self._seerr_prev_media_status = new_snapshot
@@ -258,7 +258,7 @@ class Poller:
                         "success": run.get("success"),
                     },
                 })
-            inserted = db.insert_events(events)
+            inserted = await asyncio.to_thread(db.insert_events, events)
             if inserted:
                 logger.info("[boxarr] Recorded %d new events", inserted)
         except Exception:
@@ -269,7 +269,7 @@ class Poller:
         try:
             stats = await client.get_request_stats()
             # Record stats as a periodic snapshot event
-            db.insert_event({
+            await asyncio.to_thread(db.insert_event, {
                 "source": "suggestarr",
                 "event_type": "stats_snapshot",
                 "title": f"Suggestions: {stats.get('total', 0)} total, {stats.get('today', 0)} today",
@@ -310,12 +310,12 @@ class Poller:
                     fs = await self._get_fs_stats(path)
                     if fs:
                         total, used = fs
-                        db.insert_storage_snapshot(path, total, used, f"{name}_rootfolder")
+                        await asyncio.to_thread(db.insert_storage_snapshot, path, total, used, f"{name}_rootfolder")
                         count += 1
                     elif f.get("totalSpace", 0) > 0:
                         total = f["totalSpace"]
                         free = f.get("freeSpace", 0)
-                        db.insert_storage_snapshot(path, total, total - free, f"{name}_rootfolder")
+                        await asyncio.to_thread(db.insert_storage_snapshot, path, total, total - free, f"{name}_rootfolder")
                         count += 1
             except Exception:
                 logger.exception("[%s] Failed to poll root folders", name)
@@ -412,7 +412,7 @@ class Poller:
             try:
                 series = await self._clients["sonarr"].get_series()
                 total_size = sum(s.get("statistics", {}).get("sizeOnDisk", 0) for s in series)
-                db.insert_library_snapshot("sonarr", "TV Series", len(series), total_size)
+                await asyncio.to_thread(db.insert_library_snapshot, "sonarr", "TV Series", len(series), total_size)
                 count += 1
             except Exception:
                 logger.exception("[sonarr] Failed to poll library stats")
@@ -422,7 +422,7 @@ class Poller:
             try:
                 movies = await self._clients["radarr"].get_movies()
                 total_size = sum(m.get("sizeOnDisk", 0) for m in movies)
-                db.insert_library_snapshot("radarr", "Movies", len(movies), total_size)
+                await asyncio.to_thread(db.insert_library_snapshot, "radarr", "Movies", len(movies), total_size)
                 count += 1
             except Exception:
                 logger.exception("[radarr] Failed to poll library stats")
@@ -432,7 +432,7 @@ class Poller:
             try:
                 artists = await self._clients["lidarr"].get_artists()
                 total_size = sum(a.get("statistics", {}).get("sizeOnDisk", 0) for a in artists)
-                db.insert_library_snapshot("lidarr", "Music Artists", len(artists), total_size)
+                await asyncio.to_thread(db.insert_library_snapshot, "lidarr", "Music Artists", len(artists), total_size)
                 count += 1
             except Exception:
                 logger.exception("[lidarr] Failed to poll library stats")
@@ -475,7 +475,7 @@ class Poller:
                     # STRM/IPTV libraries: negligible disk usage (.strm files are tiny text files)
                     is_strm = "strm" in lib_name.lower() or "ifiesta" in lib_name.lower()
                     if is_strm:
-                        db.insert_library_snapshot("jellyfin", lib_name, item_count, None)
+                        await asyncio.to_thread(db.insert_library_snapshot, "jellyfin", lib_name, item_count, None)
                         count += 1
                         continue
 
@@ -486,7 +486,7 @@ class Poller:
                     if lib_paths & arr_root_paths:
                         # Arr already records an accurate size for this library — store NULL
                         # to avoid a misleading duplicate entry with a different value.
-                        db.insert_library_snapshot("jellyfin", lib_name, item_count, None)
+                        await asyncio.to_thread(db.insert_library_snapshot, "jellyfin", lib_name, item_count, None)
                         count += 1
                         continue
 
@@ -497,7 +497,7 @@ class Poller:
                         if measured is not None:
                             size = (size or 0) + measured
 
-                    db.insert_library_snapshot("jellyfin", lib_name, item_count, size)
+                    await asyncio.to_thread(db.insert_library_snapshot, "jellyfin", lib_name, item_count, size)
                     count += 1
             except Exception:
                 logger.exception("[jellyfin] Failed to poll library stats")
@@ -515,7 +515,7 @@ class Poller:
                         stats = {}
                     item_count = stats.get("totalItems", 0)
                     size = stats.get("totalSize", None)
-                    db.insert_library_snapshot("audiobookshelf", lib_name, item_count, size)
+                    await asyncio.to_thread(db.insert_library_snapshot, "audiobookshelf", lib_name, item_count, size)
                     count += 1
             except Exception:
                 logger.exception("[audiobookshelf] Failed to poll library stats")
@@ -524,7 +524,7 @@ class Poller:
         if "dispatcharr" in self._clients:
             try:
                 channel_count = await self._clients["dispatcharr"].get_channel_count()
-                db.insert_library_snapshot("dispatcharr", "IPTV Channels", channel_count, None)
+                await asyncio.to_thread(db.insert_library_snapshot, "dispatcharr", "IPTV Channels", channel_count, None)
                 count += 1
             except Exception:
                 logger.exception("[dispatcharr] Failed to poll library stats")
@@ -557,13 +557,13 @@ class Poller:
                         warnings = await client.get_health()
                         if isinstance(warnings, list) and warnings:
                             detail = "; ".join(w.get("message", "") for w in warnings[:3])
-                            db.upsert_health(name, "degraded", detail)
+                            await asyncio.to_thread(db.upsert_health, name, "degraded", detail)
                             continue
-                    db.upsert_health(name, "healthy", detail)
+                    await asyncio.to_thread(db.upsert_health, name, "healthy", detail)
                 else:
-                    db.upsert_health(name, "unreachable", "Ping failed")
+                    await asyncio.to_thread(db.upsert_health, name, "unreachable", "Ping failed")
             except Exception as e:
-                db.upsert_health(name, "unreachable", str(e)[:200])
+                await asyncio.to_thread(db.upsert_health, name, "unreachable", str(e)[:200])
 
     # -- Retention --
 
@@ -574,7 +574,7 @@ class Poller:
         while self._running:
             try:
                 from app.retention import run_retention
-                results = run_retention()
+                results = await asyncio.to_thread(run_retention)
                 logger.info("Retention completed: %s", results)
             except Exception:
                 logger.exception("Error in retention job")
