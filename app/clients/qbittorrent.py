@@ -1,6 +1,5 @@
 """qBittorrent client — torrent queue monitoring."""
 
-import hashlib
 import logging
 from typing import Any
 

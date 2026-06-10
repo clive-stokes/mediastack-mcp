@@ -250,7 +250,7 @@ def mediastack_libraries(source: str | None = None, include_delta: bool = True) 
     """
     libraries = db.get_libraries_current()
     if source:
-        libraries = [l for l in libraries if l["source"] == source]
+        libraries = [lib for lib in libraries if lib["source"] == source]
     if not libraries:
         return "No library data yet. The poller needs at least one library snapshot cycle."
 
