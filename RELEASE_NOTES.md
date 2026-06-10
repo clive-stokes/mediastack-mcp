@@ -1,3 +1,57 @@
+# MediaStack MCP v1.2.0
+
+## Changes
+
+### Feat: opt-in bearer token auth on `/mcp` and `/ingest`
+
+New optional `MEDIASTACK_AUTH_TOKEN` env var. When set, requests to `/mcp`
+and `/ingest` without `Authorization: Bearer <token>` are rejected with 401
+(`secrets.compare_digest` comparison). `/health` stays open for the Docker
+healthcheck. Unset = previous behaviour; existing deployments unaffected
+until they opt in. Rationale: 127.0.0.1 port binding protects against the
+LAN, not against the ~15 containers sharing `npm-network` — any compromised
+container previously had unauthenticated access to the file deletion tools.
+
+### Perf: persistent HTTP clients and database connection pool
+
+- `ArrClient`/`JellyfinClient` now reuse one `httpx.AsyncClient` per service
+  instead of a new TCP connection per request; closed cleanly on shutdown.
+- `db.py` borrows from a `ThreadedConnectionPool` (1–5) instead of
+  `psycopg2.connect()` per call.
+- All `db.*` calls made from coroutines (poller loops, `/health`, `/ingest`)
+  are wrapped in `asyncio.to_thread(...)` — the event loop no longer stalls
+  on database I/O.
+
+### Fix: retention rollup dropped per-type counts from daily summaries
+
+The summary INSERT grouped by a per-event-type window count, so event types
+with different daily counts collided on the `rollup_{source}_{day}` dedup
+key and only the first survived. Summaries now aggregate per type in a CTE
+first, then fold into one complete row per (day, source).
+
+### Fix: `_run_async` fallback broke on Python 3.14
+
+`asyncio.get_event_loop()` raises `RuntimeError` on 3.14 when no loop
+exists; the startup-race fallback now uses `asyncio.run()`.
+
+### Test: four-tier test suite + CI
+
+72 tests. Tier 1 pure logic (confirmation protocol, path validation, env
+discovery, auth middleware); tier 2 mocked HTTP via respx (delete previews,
+client headers, history parsing); tier 3 real throwaway PostgreSQL (dedup,
+retention, growth); tier 4 opt-in live smoke (`pytest -m live`). GitHub
+Actions workflow runs ruff + tiers 1–3 on push/PR.
+
+### Build/docs
+
+- MCP SDK pinned `>=1.8,<2.0` with a guard test for the
+  `_validate_accept_header` monkey-patch target.
+- `.env.example` added (quick start step 2 previously referenced a file
+  that did not exist); README Python version corrected to 3.14, threading
+  model wording fixed, tests claim replaced by one that is true.
+
+---
+
 # MediaStack MCP v1.1.0
 
 ## Changes
