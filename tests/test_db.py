@@ -180,7 +180,10 @@ def test_storage_growth_slope_within_tolerance():
 
     growth = db.get_storage_growth("/media", days=7)
     assert growth is not None
-    assert growth["delta_bytes"] == 7 * one_gb
+    # The oldest snapshot sits at exactly NOW()-7d when seeded and drifts
+    # outside the >= window by query time, so the delta covers 6 or 7 days —
+    # the slope is what matters and the seed is linear.
+    assert growth["delta_bytes"] in (6 * one_gb, 7 * one_gb)
     # Within 1% of 1 GB/day
     assert abs(growth["bytes_per_day"] - one_gb) < one_gb * 0.01
 

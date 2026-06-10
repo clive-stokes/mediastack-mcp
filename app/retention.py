@@ -8,8 +8,6 @@ Runs periodically to:
 
 import logging
 
-import psycopg2
-
 from app import db
 
 logger = logging.getLogger(__name__)
