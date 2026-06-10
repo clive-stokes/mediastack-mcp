@@ -89,6 +89,14 @@ class Poller:
 
     async def stop(self) -> None:
         self._running = False
+        for name, client in self._clients.items():
+            close = getattr(client, "close", None)
+            if close is None:
+                continue
+            try:
+                await close()
+            except Exception:
+                logger.warning("[%s] Error closing HTTP client", name, exc_info=True)
 
     # -- Event polling --
 
