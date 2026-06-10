@@ -48,8 +48,9 @@ def _run_async(coro, timeout: int = 30):
     if _poller_loop and _poller_loop.is_running():
         future = asyncio.run_coroutine_threadsafe(coro, _poller_loop)
         return future.result(timeout=timeout)
-    # Fallback: create a new event loop
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Fallback: no poller loop yet (startup race) — run on a fresh loop.
+    # asyncio.get_event_loop() raises RuntimeError here on Python >= 3.14.
+    return asyncio.run(coro)
 
 
 # -- Health endpoint --
