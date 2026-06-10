@@ -25,6 +25,8 @@ services:
     environment:
       TZ: ${TZ}
       PYTHONUNBUFFERED: 1
+      # Optional bearer auth for /mcp and /ingest (empty = disabled)
+      MEDIASTACK_AUTH_TOKEN: ${MEDIASTACK_AUTH_TOKEN:-}
       # Library polling schedule — fires daily at HH:MM (container local time via TZ above).
       # Run once at startup, then wait until next occurrence. Avoids waking hibernating HDDs.
       # Comment out to fall back to MEDIASTACK_LIBRARY_INTERVAL (default 6h).

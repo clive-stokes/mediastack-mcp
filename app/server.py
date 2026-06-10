@@ -2219,7 +2219,12 @@ def _run_poller_thread(config: Config) -> None:
 
 
 def main():
+    import os
     import threading
+
+    import uvicorn
+
+    from app.auth import BearerAuthMiddleware
 
     global _config
 
@@ -2234,7 +2239,18 @@ def main():
     )
     poller_thread.start()
 
-    mcp_app.run(transport="streamable-http")
+    # Build the Starlette app ourselves (equivalent to
+    # mcp_app.run(transport="streamable-http")) so middleware can be attached.
+    app = mcp_app.streamable_http_app()
+
+    auth_token = os.environ.get("MEDIASTACK_AUTH_TOKEN", "").strip()
+    if auth_token:
+        app.add_middleware(BearerAuthMiddleware, token=auth_token)
+        logger.info("Bearer auth enabled for /mcp and /ingest")
+    else:
+        logger.info("MEDIASTACK_AUTH_TOKEN not set — endpoints are unauthenticated")
+
+    uvicorn.run(app, host=mcp_app.settings.host, port=mcp_app.settings.port)
 
 
 if __name__ == "__main__":
