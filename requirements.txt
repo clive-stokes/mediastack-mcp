@@ -1,4 +1,8 @@
-mcp[cli]>=1.0.0
+# mcp pinned <2.0: app/server.py monkey-patches the private SDK internal
+# StreamableHTTPServerTransport._validate_accept_header (see comment there).
+# >=1.8 is where the streamable-http transport landed. Verified on 1.27.0;
+# tests/test_sdk_patch.py fails loudly if an upgrade breaks the patch target.
+mcp[cli]>=1.8,<2.0
 psycopg2-binary>=2.9
 httpx>=0.27
 uvicorn>=0.27
