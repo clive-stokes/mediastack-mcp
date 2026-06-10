@@ -135,6 +135,21 @@ curl http://127.0.0.1:9202/health
 }
 ```
 
+## Authentication (optional)
+
+Set `MEDIASTACK_AUTH_TOKEN` to require a bearer token on `/mcp` and `/ingest`
+(401 without it). `/health` stays open for the Docker healthcheck. When the
+variable is unset, everything behaves as before — existing deployments are
+unaffected until they opt in.
+
+```bash
+# generate a token
+openssl rand -hex 32
+```
+
+Host port binding to 127.0.0.1 protects against the LAN, but not against
+other containers sharing the Docker network. The token closes that gap.
+
 ## Connecting to MCP Clients
 
 ### Claude Code
@@ -166,6 +181,15 @@ Add to `claude_desktop_config.json`:
 
 For non-HTTPS connections, add `"--allow-http"` to the args.
 
+With `MEDIASTACK_AUTH_TOKEN` set, pass the token via `mcp-remote`'s
+`--header` flag (one array element for the flag, one for the value):
+```json
+      "args": [
+        "mcp-remote", "http://127.0.0.1:9202/mcp",
+        "--header", "Authorization: Bearer your_token_here"
+      ]
+```
+
 ## Architecture
 
 ```
@@ -195,6 +219,7 @@ app/
 | `MEDIASTACK_POLL_INTERVAL` | 300 | Event polling interval (seconds) |
 | `MEDIASTACK_STORAGE_INTERVAL` | 3600 | Storage snapshot interval (seconds) |
 | `MEDIASTACK_LIBRARY_INTERVAL` | 21600 | Library snapshot interval (seconds) |
+| `MEDIASTACK_AUTH_TOKEN` | unset | Bearer token required on `/mcp` and `/ingest` when set |
 
 ### Service Environment Variables
 
