@@ -57,7 +57,7 @@ def _run_async(coro, timeout: int = 30):
 @mcp_app.custom_route("/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
     try:
-        stats = db.get_stats()
+        stats = await asyncio.to_thread(db.get_stats)
         return JSONResponse({
             "status": "ok",
             "build": MEDIASTACK_BUILD,
@@ -120,7 +120,7 @@ async def ingest(request: Request) -> JSONResponse:
         "source_event_id": source_event_id,
     }
 
-    inserted = db.insert_event(event)
+    inserted = await asyncio.to_thread(db.insert_event, event)
     logger.info(
         "Ingest: source=%s event_type=%s title=%r inserted=%s",
         source, event_type, body.get("title"), inserted,
