@@ -2250,7 +2250,17 @@ def main():
     else:
         logger.info("MEDIASTACK_AUTH_TOKEN not set — endpoints are unauthenticated")
 
-    uvicorn.run(app, host=mcp_app.settings.host, port=mcp_app.settings.port)
+    try:
+        uvicorn.run(app, host=mcp_app.settings.host, port=mcp_app.settings.port)
+    finally:
+        # Graceful shutdown: stop polling loops and close persistent HTTP clients
+        if _poller and _poller_loop and _poller_loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _poller.stop(), _poller_loop,
+                ).result(timeout=10)
+            except Exception:
+                logger.warning("Poller shutdown did not complete cleanly", exc_info=True)
 
 
 if __name__ == "__main__":
