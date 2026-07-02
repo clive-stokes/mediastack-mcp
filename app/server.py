@@ -368,7 +368,18 @@ def mediastack_confirm(confirmation_id: str) -> str:
         })
         return json.dumps({"status": "success", "description": action.description, "result": result}, indent=2, default=str)
     except Exception as e:
-        return json.dumps({"status": "error", "description": action.description, "error": str(e)})
+        # Execution failed — put the action back so the same ID can be retried
+        # (get() removed it; without this a transient failure forces a re-preview).
+        confirmation_store.reinstate(action)
+        return json.dumps({
+            "status": "error",
+            "description": action.description,
+            "error": str(e),
+            "message": (
+                "Execution failed; the action was NOT consumed. Retry with "
+                f"mediastack_confirm('{action.confirmation_id}') once the cause is resolved."
+            ),
+        })
 
 
 @mcp_app.tool()
@@ -1341,7 +1352,10 @@ def mediastack_jellyfin_collection_create(
                 ),
             }, indent=2)
     except Exception:
-        pass
+        logger.warning(
+            "Collection existence pre-check failed; proceeding with create",
+            exc_info=True,
+        )
 
     ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
     description = f"Create collection '{name}'"
@@ -1462,7 +1476,10 @@ def mediastack_jellyfin_playlist_create(
                 ),
             }, indent=2)
     except Exception:
-        pass  # If the check fails, proceed with creation anyway
+        logger.warning(
+            "Playlist existence pre-check failed; proceeding with create",
+            exc_info=True,
+        )
 
     ids = [i.strip() for i in item_ids.split(",")] if item_ids else []
     description = f"Create {media_type.lower()} playlist '{name}'"
@@ -2018,28 +2035,42 @@ def mediastack_ghost_history(
                         len(search_names), len(raw_names),
                     )
 
-                    # Search Jellyfin for each unique title
-                    all_jf_items: list[dict] = []
-                    seen_ids: set[str] = set()
-                    for title in search_names:
-                        try:
-                            results = _run_async(
-                                client.search_items_with_paths(
+                    # Search Jellyfin for every unique title concurrently
+                    # (bounded) — one bridge call instead of a serial
+                    # round-trip per title.
+                    async def _search_all(names: list[str]) -> list:
+                        sem = asyncio.Semaphore(4)
+
+                        async def _one(title: str):
+                            async with sem:
+                                return await client.search_items_with_paths(
                                     query=title,
                                     include_item_types=item_types,
                                     limit=50,
-                                ),
-                                timeout=60,
-                            )
-                            for item in results:
-                                iid = item.get("item_id")
-                                if iid not in seen_ids:
-                                    seen_ids.add(iid)
-                                    all_jf_items.append(item)
-                        except Exception as e:
+                                )
+
+                        return await asyncio.gather(
+                            *(_one(t) for t in names), return_exceptions=True,
+                        )
+
+                    ordered_names = list(search_names)
+                    search_results = _run_async(
+                        _search_all(ordered_names), timeout=120,
+                    )
+
+                    all_jf_items: list[dict] = []
+                    seen_ids: set[str] = set()
+                    for title, results in zip(ordered_names, search_results):
+                        if isinstance(results, BaseException):
                             logger.warning(
-                                "Jellyfin search failed for '%s': %s", title, e,
+                                "Jellyfin search failed for '%s': %s", title, results,
                             )
+                            continue
+                        for item in results:
+                            iid = item.get("item_id")
+                            if iid not in seen_ids:
+                                seen_ids.add(iid)
+                                all_jf_items.append(item)
 
                     logger.info(
                         "Ghost classify: found %d Jellyfin items from %d searches",
@@ -2146,36 +2177,7 @@ def mediastack_seerr_deletion_audit(days: int = 30, media_type: str | None = Non
 
     try:
         # Pull all unavailable events in the window.
-        conn = db._conn()
-        try:
-            import psycopg2.extras
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                if media_type:
-                    cur.execute(
-                        """
-                        SELECT id, timestamp, title, metadata
-                        FROM media_events
-                        WHERE event_type = 'seerr_media_unavailable'
-                          AND timestamp >= NOW() - (%s || ' days')::INTERVAL
-                          AND metadata->>'media_type' = %s
-                        ORDER BY timestamp DESC
-                        """,
-                        (days, media_type),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT id, timestamp, title, metadata
-                        FROM media_events
-                        WHERE event_type = 'seerr_media_unavailable'
-                          AND timestamp >= NOW() - (%s || ' days')::INTERVAL
-                        ORDER BY timestamp DESC
-                        """,
-                        (days,),
-                    )
-                rows = cur.fetchall()
-        finally:
-            conn.close()
+        rows = db.get_seerr_unavailable_events(days, media_type)
 
         # Resolve current status via one live Seerr API call (so 'recovered'
         # reflects right-now state, not the value frozen at drop time).

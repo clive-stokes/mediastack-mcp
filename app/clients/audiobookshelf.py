@@ -14,16 +14,21 @@ class AudiobookshelfClient:
         self.name = "audiobookshelf"
         self.base_url = url
         self.api_key = api_key
+        self._client = httpx.AsyncClient(
+            timeout=DEFAULT_TIMEOUT, headers=self._headers(),
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
     async def get(self, path: str, params: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(url, headers=self._headers(), params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_libraries(self) -> list[dict]:
         """Get all libraries."""
@@ -36,8 +41,7 @@ class AudiobookshelfClient:
 
     async def ping(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-                resp = await client.get(f"{self.base_url}/healthcheck")
-                return resp.status_code == 200
+            resp = await self._client.get(f"{self.base_url}/healthcheck")
+            return resp.status_code == 200
         except Exception:
             return False

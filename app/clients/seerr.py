@@ -14,16 +14,21 @@ class SeerrClient:
         self.name = "seerr"
         self.base_url = url
         self.api_key = api_key
+        self._client = httpx.AsyncClient(
+            timeout=DEFAULT_TIMEOUT, headers=self._headers(),
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"X-Api-Key": self.api_key}
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
     async def get(self, path: str, params: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(url, headers=self._headers(), params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_requests(self, take: int = 50, skip: int = 0) -> dict:
         """Fetch recent requests."""
@@ -71,11 +76,9 @@ class SeerrClient:
         return await self.delete(f"/api/v1/media/{media_id}")
 
     async def post(self, path: str, json_data: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.post(url, headers=self._headers(), json=json_data)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.post(f"{self.base_url}{path}", json=json_data)
+        resp.raise_for_status()
+        return resp.json()
 
     async def search(self, query: str) -> list[dict]:
         """Search for media in Seerr."""
@@ -84,13 +87,11 @@ class SeerrClient:
 
     async def delete(self, path: str, params: dict | None = None) -> Any:
         """DELETE request to the Seerr API."""
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.delete(url, headers=self._headers(), params=params)
-            resp.raise_for_status()
-            if resp.status_code == 204 or not resp.content:
-                return {"status": "deleted"}
-            return resp.json()
+        resp = await self._client.delete(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"status": "deleted"}
+        return resp.json()
 
     async def get_request_by_id(self, request_id: int) -> dict:
         """Fetch a single request by ID."""

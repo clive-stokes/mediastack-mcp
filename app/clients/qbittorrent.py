@@ -18,38 +18,37 @@ class QBittorrentClient:
         self.base_url = url
         self.username = username
         self.password = password
-        self._cookie: str | None = None
+        # The SID cookie from login lives in the client's cookie jar; the flag
+        # just records that a login has happened on this client.
+        self._authed = False
+        self._client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
 
-    async def _ensure_auth(self, client: httpx.AsyncClient) -> None:
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
+    async def _ensure_auth(self) -> None:
         """Authenticate if we don't have a valid session."""
-        if self._cookie:
+        if self._authed:
             return
-        resp = await client.post(
+        resp = await self._client.post(
             f"{self.base_url}/api/v2/auth/login",
             data={"username": self.username, "password": self.password},
         )
         resp.raise_for_status()
-        sid = resp.cookies.get("SID")
-        if sid:
-            self._cookie = sid
+        self._authed = True
 
     async def _get(self, path: str, params: dict | None = None) -> Any:
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            await self._ensure_auth(client)
-            cookies = {"SID": self._cookie} if self._cookie else {}
-            resp = await client.get(
-                f"{self.base_url}{path}", params=params, cookies=cookies,
-            )
-            if resp.status_code == 403:
-                # Session expired — re-auth
-                self._cookie = None
-                await self._ensure_auth(client)
-                cookies = {"SID": self._cookie} if self._cookie else {}
-                resp = await client.get(
-                    f"{self.base_url}{path}", params=params, cookies=cookies,
-                )
-            resp.raise_for_status()
-            return resp.json()
+        await self._ensure_auth()
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        if resp.status_code == 403:
+            # Session expired — re-auth
+            self._authed = False
+            self._client.cookies.clear()
+            await self._ensure_auth()
+            resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_torrents(self) -> list[dict]:
         """Fetch all torrents."""
@@ -61,13 +60,9 @@ class QBittorrentClient:
 
     async def ping(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-                await self._ensure_auth(client)
-                cookies = {"SID": self._cookie} if self._cookie else {}
-                resp = await client.get(
-                    f"{self.base_url}/api/v2/app/version", cookies=cookies,
-                )
-                return resp.status_code == 200
+            await self._ensure_auth()
+            resp = await self._client.get(f"{self.base_url}/api/v2/app/version")
+            return resp.status_code == 200
         except Exception:
             return False
 

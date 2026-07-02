@@ -116,6 +116,20 @@ def _create_schema() -> None:
                 CREATE INDEX IF NOT EXISTS idx_storage_mount_ts
                     ON storage_snapshots (mount_point, timestamp DESC);
 
+                -- Dedupe daily rollups left behind while the retention job's
+                -- ON CONFLICT DO NOTHING had no matching constraint, then
+                -- enforce uniqueness so the dedup actually works.
+                DELETE FROM storage_snapshots a
+                    USING storage_snapshots b
+                    WHERE a.id > b.id
+                      AND a.source = 'daily_rollup' AND b.source = 'daily_rollup'
+                      AND a.timestamp = b.timestamp
+                      AND a.mount_point = b.mount_point;
+
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_storage_rollup
+                    ON storage_snapshots (timestamp, mount_point)
+                    WHERE source = 'daily_rollup';
+
                 CREATE TABLE IF NOT EXISTS library_snapshots (
                     id           BIGSERIAL PRIMARY KEY,
                     timestamp    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -216,7 +230,7 @@ def get_timeline(hours: int = 24, source: str | None = None,
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            conditions = ["timestamp >= NOW() - INTERVAL '%s hours'"]
+            conditions = ["timestamp >= NOW() - make_interval(hours => %s)"]
             params: list = [hours]
             if source:
                 conditions.append(
@@ -249,7 +263,7 @@ def search_events(query: str, days: int = 30, source: str | None = None) -> list
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = [
-                "timestamp >= NOW() - INTERVAL '%s days'",
+                "timestamp >= NOW() - make_interval(days => %s)",
                 "title ILIKE %s",
             ]
             params: list = [days, f"%{query}%"]
@@ -296,7 +310,7 @@ def get_events_filtered(
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = [
                 "source = %s",
-                "timestamp >= NOW() - INTERVAL '%s days'",
+                "timestamp >= NOW() - make_interval(days => %s)",
             ]
             params: list = [source, days]
 
@@ -321,6 +335,33 @@ def get_events_filtered(
             for row in rows:
                 row["timestamp"] = row["timestamp"].isoformat()
             return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_seerr_unavailable_events(days: int, media_type: str | None = None) -> list[dict]:
+    """Fetch seerr_media_unavailable events for the deletion audit.
+
+    Returns rows with raw datetime timestamps (the caller formats them).
+    """
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            conditions = [
+                "event_type = 'seerr_media_unavailable'",
+                "timestamp >= NOW() - make_interval(days => %s)",
+            ]
+            params: list = [days]
+            if media_type:
+                conditions.append("metadata->>'media_type' = %s")
+                params.append(media_type)
+            where = " AND ".join(conditions)
+            cur.execute(
+                f"SELECT id, timestamp, title, metadata FROM media_events "
+                f"WHERE {where} ORDER BY timestamp DESC",
+                params,
+            )
+            return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
 

@@ -14,16 +14,21 @@ class BazarrClient:
         self.name = "bazarr"
         self.base_url = url
         self.api_key = api_key
+        self._client = httpx.AsyncClient(
+            timeout=DEFAULT_TIMEOUT, headers=self._headers(),
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"X-API-KEY": self.api_key}
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
     async def get(self, path: str, params: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(url, headers=self._headers(), params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_history(self, page: int = 1, page_size: int = 50) -> dict:
         """Fetch subtitle history (movies + episodes)."""
@@ -40,11 +45,9 @@ class BazarrClient:
         return await self.get("/api/system/health")
 
     async def post(self, path: str, json_data: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.post(url, headers=self._headers(), json=json_data)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.post(f"{self.base_url}{path}", json=json_data)
+        resp.raise_for_status()
+        return resp.json()
 
     async def search_subtitles_episode(self, episode_id: int, language: str | None = None) -> dict:
         """Trigger subtitle search for an episode."""

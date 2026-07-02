@@ -154,3 +154,22 @@ def test_concurrent_create_and_get_leaves_store_consistent():
 
     assert len(results) == 400
     assert len(store._pending) == 0
+
+def test_reinstate_after_failed_execute_allows_retry():
+    store = ConfirmationStore()
+    action, fn = make_action(store)
+
+    taken = store.get(action.confirmation_id)
+    assert taken is action
+    # Simulate execute_fn failing: the caller reinstates the action so the
+    # same confirmation_id can be retried.
+    store.reinstate(taken)
+
+    retried = store.get(action.confirmation_id)
+    assert retried is action
+
+    # A reinstated action keeps its original created_at — expiry still applies.
+    expire(action)
+    store.reinstate(action)
+    assert store.get(action.confirmation_id) is None
+    assert store.get_expired(action.confirmation_id) is action

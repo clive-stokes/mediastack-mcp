@@ -30,6 +30,7 @@ def _rollup_events() -> dict:
             cur.execute("""
                 SELECT count(*) FROM media_events
                 WHERE timestamp < NOW() - INTERVAL '90 days'
+                  AND event_type != 'daily_summary'
             """)
             old_count = cur.fetchone()[0]
             if old_count == 0:
@@ -100,6 +101,7 @@ def _rollup_storage() -> dict:
             cur.execute("""
                 SELECT count(*) FROM storage_snapshots
                 WHERE timestamp < NOW() - INTERVAL '14 days'
+                  AND source != 'daily_rollup'
             """)
             old_count = cur.fetchone()[0]
             if old_count == 0:
@@ -118,7 +120,8 @@ def _rollup_storage() -> dict:
                 WHERE timestamp < NOW() - INTERVAL '14 days'
                   AND source != 'daily_rollup'
                 GROUP BY date_trunc('day', timestamp), mount_point
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (timestamp, mount_point) WHERE source = 'daily_rollup'
+                DO NOTHING
             """)
 
             # Purge old hourly snapshots (keep daily rollups)

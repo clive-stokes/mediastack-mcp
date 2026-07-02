@@ -85,3 +85,71 @@ def test_client_reuses_one_underlying_httpx_client():
 
     asyncio.run(two_requests())
     asyncio.run(client.close())
+
+
+@respx.mock
+def test_seerr_client_persistent_and_sends_api_key():
+    from app.clients.seerr import SeerrClient
+
+    route = respx.get("http://seerr:5055/api/v1/status").mock(
+        return_value=httpx.Response(200, json={"version": "2.0"}),
+    )
+    client = SeerrClient("http://seerr:5055", "seerr-key")
+
+    async def two_requests():
+        first = client._client
+        await client.get("/api/v1/status")
+        await client.get("/api/v1/status")
+        assert client._client is first
+
+    asyncio.run(two_requests())
+    assert route.calls.last.request.headers["X-Api-Key"] == "seerr-key"
+    asyncio.run(client.close())
+
+
+@respx.mock
+def test_qbittorrent_reauths_on_403():
+    from app.clients.qbittorrent import QBittorrentClient
+
+    login = respx.post("http://qbit:8080/api/v2/auth/login").mock(
+        return_value=httpx.Response(
+            200, headers={"set-cookie": "SID=abc123; path=/"},
+        ),
+    )
+    info = respx.get("http://qbit:8080/api/v2/torrents/info").mock(
+        side_effect=[
+            httpx.Response(403),          # stale session
+            httpx.Response(200, json=[]), # after re-auth
+        ],
+    )
+    client = QBittorrentClient("http://qbit:8080", "u", "p")
+    client._authed = True  # pretend an old session existed
+
+    result = asyncio.run(client.get_torrents())
+    assert result == []
+    assert login.called            # re-auth happened
+    assert info.call_count == 2
+    asyncio.run(client.close())
+
+
+@respx.mock
+def test_dispatcharr_refreshes_token_on_401():
+    from app.clients.dispatcharr import DispatcharrClient
+
+    token = respx.post("http://disp:9191/api/accounts/token/").mock(
+        return_value=httpx.Response(200, json={"access": "new-jwt"}),
+    )
+    src = respx.get("http://disp:9191/api/epg/sources/").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json=[]),
+        ],
+    )
+    client = DispatcharrClient("http://disp:9191", "u", "p")
+    client._token = "stale-jwt"
+
+    result = asyncio.run(client.get_epg_sources())
+    assert result == []
+    assert token.called
+    assert src.calls.last.request.headers["Authorization"] == "Bearer new-jwt"
+    asyncio.run(client.close())

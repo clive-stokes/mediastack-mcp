@@ -90,6 +90,14 @@ class ConfirmationStore:
                 return action
         return None
 
+    def reinstate(self, action: PendingAction) -> None:
+        """Put a retrieved action back so the same confirmation_id can be
+        retried — used when execute_fn fails after get() removed the action.
+        Keeps the original created_at, so the original expiry still applies
+        (an expired retry goes through the renew flow as usual)."""
+        with self._lock:
+            self._pending[action.confirmation_id] = action
+
     def renew(self, expired_action: PendingAction) -> PendingAction:
         """Re-issue an expired action with a fresh ID and expiry."""
         renewed = expired_action.renew()

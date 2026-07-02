@@ -15,15 +15,19 @@ class SabnzbdClient:
         self.name = "sabnzbd"
         self.base_url = url
         self.api_key = api_key
+        self._client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
     async def _api(self, mode: str, extra: dict | None = None) -> Any:
         params = {"mode": mode, "apikey": self.api_key, "output": "json"}
         if extra:
             params.update(extra)
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(f"{self.base_url}/api", params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(f"{self.base_url}/api", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_history(self, limit: int = 50) -> list[dict]:
         """Fetch recent download history."""

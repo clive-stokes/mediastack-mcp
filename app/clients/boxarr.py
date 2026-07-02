@@ -13,13 +13,16 @@ class BoxarrClient:
     def __init__(self, url: str):
         self.name = "boxarr"
         self.base_url = url
+        self._client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
     async def get(self, path: str, params: dict | None = None) -> Any:
-        url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_health(self) -> dict:
         """Health check with version, Radarr status, scheduler status."""
