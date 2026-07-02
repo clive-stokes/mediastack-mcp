@@ -546,24 +546,33 @@ class Poller:
     _ARR_HEALTH_SERVICES = {"sonarr", "radarr", "lidarr", "prowlarr", "bazarr"}
 
     async def _poll_health(self) -> None:
-        """Ping all configured services and record health state changes."""
-        for name, client in self._clients.items():
+        """Ping all configured services concurrently and record state changes.
+
+        Checks run in parallel (a dead host no longer stalls the cycle for its
+        full client timeout, serially, per service); DB upserts stay serial so
+        concurrent checks can't exhaust the small connection pool.
+        """
+
+        async def _check_one(name: str, client) -> tuple[str, str, str | None]:
             try:
-                alive = await client.ping()
-                if alive:
-                    detail = None
-                    # Only check *arr-style health warnings for services that return them
-                    if name in self._ARR_HEALTH_SERVICES and hasattr(client, "get_health"):
-                        warnings = await client.get_health()
-                        if isinstance(warnings, list) and warnings:
-                            detail = "; ".join(w.get("message", "") for w in warnings[:3])
-                            await asyncio.to_thread(db.upsert_health, name, "degraded", detail)
-                            continue
-                    await asyncio.to_thread(db.upsert_health, name, "healthy", detail)
-                else:
-                    await asyncio.to_thread(db.upsert_health, name, "unreachable", "Ping failed")
+                alive = await asyncio.wait_for(client.ping(), timeout=15)
+                if not alive:
+                    return name, "unreachable", "Ping failed"
+                # Only check *arr-style health warnings for services that return them
+                if name in self._ARR_HEALTH_SERVICES and hasattr(client, "get_health"):
+                    warnings = await client.get_health()
+                    if isinstance(warnings, list) and warnings:
+                        detail = "; ".join(w.get("message", "") for w in warnings[:3])
+                        return name, "degraded", detail
+                return name, "healthy", None
             except Exception as e:
-                await asyncio.to_thread(db.upsert_health, name, "unreachable", str(e)[:200])
+                return name, "unreachable", (str(e) or type(e).__name__)[:200]
+
+        results = await asyncio.gather(
+            *(_check_one(n, c) for n, c in self._clients.items())
+        )
+        for name, status, detail in results:
+            await asyncio.to_thread(db.upsert_health, name, status, detail)
 
     # -- Retention --
 
