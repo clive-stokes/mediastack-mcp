@@ -1,10 +1,10 @@
 # MediaStack MCP
 
-Unified MCP server for the NASgnolia media stack. Observes events, storage, and health across 9 services; provides write operations with confirmation protocol.
+Unified MCP server for the NASgnolia media stack. Observes events, storage, and health across 13 services; provides write operations with confirmation protocol.
 
 ## Tech Stack
 
-- **Language:** Python 3.11
+- **Language:** Python 3.14
 - **Protocol:** MCP via FastMCP (streamable-http transport)
 - **Database:** PostgreSQL (existing NASgnolia instance)
 - **HTTP client:** httpx (async)
@@ -16,7 +16,7 @@ Unified MCP server for the NASgnolia media stack. Observes events, storage, and 
 app/
 ├── __init__.py
 ├── __main__.py         # Entry point
-├── server.py           # FastMCP server, 18 MCP tools, health endpoint
+├── server.py           # FastMCP server, 35 MCP tools, health endpoint
 ├── config.py           # Service auto-discovery from env vars
 ├── filesystem.py       # Filesystem scanning, path validation, orphan detection
 ├── db.py               # PostgreSQL schema, queries, event storage
